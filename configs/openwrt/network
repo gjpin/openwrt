@@ -1,76 +1,70 @@
-################################################
-##### Devices
-################################################
+# OpenWrt UCI batch overlay. This is not a complete /etc/config/network file.
+# Project-owned sections are recreated by stable name. The router-generated
+# loopback, globals, WAN/WAN6, and br_lan device sections remain in place.
 
-# Bridge device with VLAN filtering
-config device
-    option name 'br-lan'
-    option type 'bridge'
-    list ports 'lan1'
-    list ports 'lan2'
-    list ports 'lan3'
-    list ports 'lan4'
+# Normalize only the four supported DSA ports. Preflight rejects any other
+# br_lan port, while all unrelated br_lan options are preserved.
+del_list network.br_lan.ports='lan1'
+del_list network.br_lan.ports='lan2'
+del_list network.br_lan.ports='lan3'
+del_list network.br_lan.ports='lan4'
+add_list network.br_lan.ports='lan1'
+add_list network.br_lan.ports='lan2'
+add_list network.br_lan.ports='lan3'
+add_list network.br_lan.ports='lan4'
 
-################################################
-##### VLANs
-################################################
+delete network.pixelmain_vlan
+set network.pixelmain_vlan='bridge-vlan'
+set network.pixelmain_vlan.device='br-lan'
+set network.pixelmain_vlan.vlan='1'
+add_list network.pixelmain_vlan.ports='lan1:u*'
+add_list network.pixelmain_vlan.ports='lan2:u*'
+add_list network.pixelmain_vlan.ports='lan3:u*'
+add_list network.pixelmain_vlan.ports='lan4:u*'
 
-# VLAN 1 - PixelMain (full access)
-config bridge-vlan
-    option device 'br-lan'
-    option vlan '1'
-    list ports 'lan1:u*'    # Untagged, primary VLAN
-    list ports 'lan2:u*'
-    list ports 'lan3:u*'
-    list ports 'lan4:u*'
+delete network.pixelsecondary_vlan
+set network.pixelsecondary_vlan='bridge-vlan'
+set network.pixelsecondary_vlan.device='br-lan'
+set network.pixelsecondary_vlan.vlan='4'
+add_list network.pixelsecondary_vlan.ports='lan1:t'
 
-# VLAN 4 - PixelSecondary (internet)
-config bridge-vlan
-    option device 'br-lan'
-    option vlan '4'
-    list ports 'lan1:t'     # Tagged on lan1 for trunk
+delete network.pixelguest_vlan
+set network.pixelguest_vlan='bridge-vlan'
+set network.pixelguest_vlan.device='br-lan'
+set network.pixelguest_vlan.vlan='2'
+add_list network.pixelguest_vlan.ports='lan1:t'
 
-# VLAN 2 - PixelGuest (internet access)
-config bridge-vlan
-    option device 'br-lan'
-    option vlan '2'
-    list ports 'lan1:t'     # Tagged on lan1 for trunk
+delete network.pixeliot_vlan
+set network.pixeliot_vlan='bridge-vlan'
+set network.pixeliot_vlan.device='br-lan'
+set network.pixeliot_vlan.vlan='3'
+add_list network.pixeliot_vlan.ports='lan1:t'
 
-# VLAN 3 - PixelIoT (no internet)
-config bridge-vlan
-    option device 'br-lan'
-    option vlan '3'
-    list ports 'lan1:t'     # Tagged on lan1 for trunk
+delete network.pixelmain
+set network.pixelmain='interface'
+set network.pixelmain.device='br-lan.1'
+set network.pixelmain.proto='static'
+set network.pixelmain.ipaddr='192.168.1.1'
+set network.pixelmain.netmask='255.255.255.0'
+set network.pixelmain.ip6assign='60'
 
-################################################
-##### Interfaces
-################################################
+delete network.pixelsecondary
+set network.pixelsecondary='interface'
+set network.pixelsecondary.device='br-lan.4'
+set network.pixelsecondary.proto='static'
+set network.pixelsecondary.ipaddr='192.168.4.1'
+set network.pixelsecondary.netmask='255.255.255.0'
 
-# Interface: PixelMain (VLAN 1)
-config interface 'pixelmain'
-    option device 'br-lan.1'
-    option proto 'static'
-    option ipaddr '192.168.1.1'
-    option netmask '255.255.255.0'
-    option ip6assign '60'
+delete network.pixelguest
+set network.pixelguest='interface'
+set network.pixelguest.device='br-lan.2'
+set network.pixelguest.proto='static'
+set network.pixelguest.ipaddr='192.168.2.1'
+set network.pixelguest.netmask='255.255.255.0'
 
-# Interface: PixelSecondary (VLAN 4)
-config interface 'pixelsecondary'
-    option device 'br-lan.4'
-    option proto 'static'
-    option ipaddr '192.168.4.1'
-    option netmask '255.255.255.0'
-
-# Interface: PixelGuest (VLAN 2)
-config interface 'pixelguest'
-    option device 'br-lan.2'
-    option proto 'static'
-    option ipaddr '192.168.2.1'
-    option netmask '255.255.255.0'
-
-# Interface: PixelIoT (VLAN 3)
-config interface 'pixeliot'
-    option device 'br-lan.3'
-    option proto 'static'
-    option ipaddr '192.168.3.1'
-    option netmask '255.255.255.0'
+delete network.pixeliot
+set network.pixeliot='interface'
+set network.pixeliot.device='br-lan.3'
+set network.pixeliot.proto='static'
+set network.pixeliot.ipaddr='192.168.3.1'
+set network.pixeliot.netmask='255.255.255.0'

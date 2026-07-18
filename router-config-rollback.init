@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+
+# Roll back any network transaction that was still pending at reboot. START=05
+# runs before normal network initialization on standard OpenWrt installations.
+
+# Values are consumed by /etc/rc.common.
+# shellcheck disable=SC2034
+START=05
+# shellcheck disable=SC2034
+STOP=89
+
+start() {
+    @ROUTER_CONFIG@ _recover-pending
+}

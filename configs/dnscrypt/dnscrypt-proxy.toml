@@ -17,7 +17,7 @@
 server_names = ['custom-quad9', 'custom-cloudflare', 'custom-controld', 'custom-mullvad']
 
 # List of local addresses and ports to listen to
-listen_addresses = ['127.0.0.1:53']
+listen_addresses = ['127.0.0.53:53']
 
 # Maximum number of simultaneous client connections to accept
 max_clients = 250

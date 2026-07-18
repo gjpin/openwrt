@@ -1,39 +1,34 @@
-################################################
-##### Wi-Fi SSID
-################################################
+# OpenWrt UCI batch overlay. This is not a complete /etc/config/wireless file.
+# Keys are injected by router-config.sh and never stored in this fragment.
 
-# PixelMain WiFi - Full access
-config wifi-iface 'wifinet1'
-    option device 'radio0'
-    option mode 'ap'
-    option network 'pixelmain'
-    option ssid 'PixelMain'
-    option encryption 'sae'
-    option key "'${MAIN_WIFI_PASSWORD}'"
+delete wireless.pixelmain
+set wireless.pixelmain='wifi-iface'
+set wireless.pixelmain.device='radio0'
+set wireless.pixelmain.mode='ap'
+set wireless.pixelmain.network='pixelmain'
+set wireless.pixelmain.ssid='PixelMain'
+set wireless.pixelmain.encryption='sae'
 
-# PixelSecondary WiFi - Internet
-config wifi-iface 'wifinet4'
-    option device 'radio0'
-    option mode 'ap'
-    option network 'pixelsecondary'
-    option ssid 'PixelSecondary'
-    option encryption 'sae'
-    option key "'${SECONDARY_WIFI_PASSWORD}'"
+delete wireless.pixelsecondary
+set wireless.pixelsecondary='wifi-iface'
+set wireless.pixelsecondary.device='radio0'
+set wireless.pixelsecondary.mode='ap'
+set wireless.pixelsecondary.network='pixelsecondary'
+set wireless.pixelsecondary.ssid='PixelSecondary'
+set wireless.pixelsecondary.encryption='sae'
 
-# PixelGuest WiFi - Internet
-config wifi-iface 'wifinet2'
-    option device 'radio0'
-    option mode 'ap'
-    option network 'pixelguest'
-    option ssid 'PixelGuest'
-    option encryption 'sae'
-    option key "'${GUEST_WIFI_PASSWORD}'"
+delete wireless.pixelguest
+set wireless.pixelguest='wifi-iface'
+set wireless.pixelguest.device='radio0'
+set wireless.pixelguest.mode='ap'
+set wireless.pixelguest.network='pixelguest'
+set wireless.pixelguest.ssid='PixelGuest'
+set wireless.pixelguest.encryption='sae'
 
-# PixelIoT WiFi - No internet
-config wifi-iface 'wifinet3'
-    option device 'radio0'
-    option mode 'ap'
-    option network 'pixeliot'
-    option ssid 'PixelIoT'
-    option encryption 'sae'
-    option key "'${IOT_WIFI_PASSWORD}'"
+delete wireless.pixeliot
+set wireless.pixeliot='wifi-iface'
+set wireless.pixeliot.device='radio0'
+set wireless.pixeliot.mode='ap'
+set wireless.pixeliot.network='pixeliot'
+set wireless.pixeliot.ssid='PixelIoT'
+set wireless.pixeliot.encryption='sae'

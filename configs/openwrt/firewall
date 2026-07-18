@@ -1,97 +1,81 @@
-################################################
-##### Zones
-################################################
+# OpenWrt UCI batch overlay. This is not a complete /etc/config/firewall file.
+# The router-generated defaults and WAN zone remain in place.
 
-# Zone: PixelMain - Can access internet and other VLANs
-config zone
-    option name 'pixelmain'
-    list network 'pixelmain'
-    option input 'ACCEPT'
-    option output 'ACCEPT'
-    option forward 'REJECT'
+delete firewall.pixelmain
+set firewall.pixelmain='zone'
+set firewall.pixelmain.name='pixelmain'
+add_list firewall.pixelmain.network='pixelmain'
+set firewall.pixelmain.input='ACCEPT'
+set firewall.pixelmain.output='ACCEPT'
+set firewall.pixelmain.forward='REJECT'
 
-# Zone: PixelGuest - Internet access, isolated from other VLANs
-config zone
-    option name 'pixelguest'
-    list network 'pixelguest'
-    option input 'REJECT'     # Block access to router
-    option output 'ACCEPT'     # Allow internet
-    option forward 'REJECT'   # Block inter-VLAN
+delete firewall.pixelguest
+set firewall.pixelguest='zone'
+set firewall.pixelguest.name='pixelguest'
+add_list firewall.pixelguest.network='pixelguest'
+set firewall.pixelguest.input='REJECT'
+set firewall.pixelguest.output='ACCEPT'
+set firewall.pixelguest.forward='REJECT'
 
-# Zone: PixelIoT - No internet, isolated
-config zone
-    option name 'pixeliot'
-    list network 'pixeliot'
-    option input 'REJECT'
-    option output 'REJECT'
-    option forward 'REJECT'
+delete firewall.pixeliot
+set firewall.pixeliot='zone'
+set firewall.pixeliot.name='pixeliot'
+add_list firewall.pixeliot.network='pixeliot'
+set firewall.pixeliot.input='REJECT'
+set firewall.pixeliot.output='REJECT'
+set firewall.pixeliot.forward='REJECT'
 
-# Zone: PixelSecondary - Internet access, no VLAN access
-config zone
-    option name 'pixelsecondary'
-    list network 'pixelsecondary'
-    option input 'REJECT'     # Block access to router
-    option output 'ACCEPT'    # Allow internet
-    option forward 'REJECT'   # Block inter-VLAN
+delete firewall.pixelsecondary
+set firewall.pixelsecondary='zone'
+set firewall.pixelsecondary.name='pixelsecondary'
+add_list firewall.pixelsecondary.network='pixelsecondary'
+set firewall.pixelsecondary.input='REJECT'
+set firewall.pixelsecondary.output='ACCEPT'
+set firewall.pixelsecondary.forward='REJECT'
 
-################################################
-##### Forwarding rules
-################################################
+delete firewall.pixelmain_wan
+set firewall.pixelmain_wan='forwarding'
+set firewall.pixelmain_wan.src='pixelmain'
+set firewall.pixelmain_wan.dest='wan'
+delete firewall.pixelguest_wan
+set firewall.pixelguest_wan='forwarding'
+set firewall.pixelguest_wan.src='pixelguest'
+set firewall.pixelguest_wan.dest='wan'
+delete firewall.pixelsecondary_wan
+set firewall.pixelsecondary_wan='forwarding'
+set firewall.pixelsecondary_wan.src='pixelsecondary'
+set firewall.pixelsecondary_wan.dest='wan'
+delete firewall.pixelmain_secondary
+set firewall.pixelmain_secondary='forwarding'
+set firewall.pixelmain_secondary.src='pixelmain'
+set firewall.pixelmain_secondary.dest='pixelsecondary'
+delete firewall.pixelmain_guest
+set firewall.pixelmain_guest='forwarding'
+set firewall.pixelmain_guest.src='pixelmain'
+set firewall.pixelmain_guest.dest='pixelguest'
+delete firewall.pixelmain_iot
+set firewall.pixelmain_iot='forwarding'
+set firewall.pixelmain_iot.src='pixelmain'
+set firewall.pixelmain_iot.dest='pixeliot'
 
-# Forwarding: PixelMain -> WAN (internet access)
-config forwarding
-    option src 'pixelmain'
-    option dest 'wan'
-
-# Forwarding: PixelGuest -> WAN (internet access)
-config forwarding
-    option src 'pixelguest'
-    option dest 'wan'
-
-# Forwarding: PixelSecondary -> WAN (internet access)
-config forwarding
-    option src 'pixelsecondary'
-    option dest 'wan'
-
-# Forwarding: PixelMain -> PixelSecondary (PixelMain can access PixelSecondary)
-config forwarding
-    option src 'pixelmain'
-    option dest 'pixelsecondary'
-
-# Forwarding: PixelMain -> PixelGuest (PixelMain can access PixelGuest)
-config forwarding
-    option src 'pixelmain'
-    option dest 'pixelguest'
-
-# Forwarding: PixelMain -> PixelIoT (PixelMain can access PixelIoT)
-config forwarding
-    option src 'pixelmain'
-    option dest 'pixeliot'
-
-################################################
-##### Rules
-################################################
-
-# Allow PixelSecondary to reach DNS/DHCP on router
-config rule
-    option name 'PixelSecondary-DNS-DHCP'
-    option src 'pixelsecondary'
-    option dest_port '53 67 68'
-    option proto 'tcp udp'
-    option target 'ACCEPT'
-
-# Allow PixelGuest to reach DNS/DHCP on router (optional)
-config rule
-    option name 'PixelGuest-DNS-DHCP'
-    option src 'pixelguest'
-    option dest_port '53 67 68'
-    option proto 'tcp udp'
-    option target 'ACCEPT'
-
-# Allow PixelIoT to reach DNS/DHCP on router (optional)
-config rule
-    option name 'PixelIoT-DNS-DHCP'
-    option src 'pixeliot'
-    option dest_port '53 67 68'
-    option proto 'tcp udp'
-    option target 'ACCEPT'
+delete firewall.pixelsecondary_services
+set firewall.pixelsecondary_services='rule'
+set firewall.pixelsecondary_services.name='PixelSecondary-DNS-DHCP'
+set firewall.pixelsecondary_services.src='pixelsecondary'
+set firewall.pixelsecondary_services.dest_port='53 67 68'
+set firewall.pixelsecondary_services.proto='tcp udp'
+set firewall.pixelsecondary_services.target='ACCEPT'
+delete firewall.pixelguest_services
+set firewall.pixelguest_services='rule'
+set firewall.pixelguest_services.name='PixelGuest-DNS-DHCP'
+set firewall.pixelguest_services.src='pixelguest'
+set firewall.pixelguest_services.dest_port='53 67 68'
+set firewall.pixelguest_services.proto='tcp udp'
+set firewall.pixelguest_services.target='ACCEPT'
+delete firewall.pixeliot_services
+set firewall.pixeliot_services='rule'
+set firewall.pixeliot_services.name='PixelIoT-DNS-DHCP'
+set firewall.pixeliot_services.src='pixeliot'
+set firewall.pixeliot_services.dest_port='53 67 68'
+set firewall.pixeliot_services.proto='tcp udp'
+set firewall.pixeliot_services.target='ACCEPT'
