@@ -1,256 +1,123 @@
-# OpenWrt network layout
+# OpenWrt router configuration
 
-## Provisioning entrypoint and modules
+This repository provisions a device-specific OpenWrt network with four isolated
+VLANs, encrypted DNS, DNS blocklists, and a WireGuard server. Changes are built
+as one validated candidate and applied with automatic rollback unless they are
+confirmed within five minutes.
 
-`setup.sh --recovery-ready` is the only supported provisioning entrypoint. The
-files under `modules/` are internal POSIX `sh` modules that are sourced by the
-entrypoint or transaction helper; they are not standalone commands and cannot
-be selected or reordered by callers.
+## Features
 
-The fixed, fail-fast execution order is:
+- Four WPA3 networks: Main, Guest, IoT, and Secondary
+- VLAN and DHCP configuration for each network
+- Allowlisted inter-VLAN and internet access
+- DNSCrypt upstream DNS with DNS bypass controls
+- DNS-based ad and tracker blocking
+- A WireGuard server attached to the trusted Main zone
+- Checksummed backups, candidate validation, and timed/early-boot rollback
 
-1. `base-packages.sh` updates package metadata and installs the common tools.
-2. The DNSCrypt, adblock-fast, and WireGuard modules install their packages and
-   enable the applicable init scripts. Package installation is intentionally
-   outside rollback.
-3. The six feature overlays in `uci/` are applied in network, firewall,
-   wireless, DNS, adblock-fast, and WireGuard order to one protected candidate.
-4. The candidate is validated, installed, and held pending until explicitly
-   confirmed from a recovery-capable session.
+## Compatibility and safety
 
-`router-config.sh` owns shared preflight checks, candidate construction,
-checksums, backups, installation, confirmation, and rollback. Its boundary
-protects `network`, `firewall`, `wireless`, `dhcp`, `system`, `adblock-fast`, and
-the DNSCrypt TOML file. Modules contain installation and transaction callbacks;
-they perform no post-confirmation live UCI mutations.
+This configuration supports fresh OpenWrt 25.12 or newer installations using
+official `apk` feeds and at least 256 MB RAM. It is specific to hardware with
+`radio0`, `br-lan`, and DSA ports `lan1` through `lan4`. The existing router must
+also have its standard loopback, globals, WAN/WAN6, firewall defaults, WAN zone,
+and a single dnsmasq section.
 
-## Secrets and input contract
+Do not run this on a router with a different port or radio layout. Applying the
+network, firewall, and wireless changes can disconnect every remote session.
+First make an off-router configuration backup and verify a recovery path through
+local Ethernet or serial. `setup.sh` must run on the target router as `root`; do
+not run it on a workstation.
 
-Export all secrets in the router shell before invoking setup. Do not write them
-to this repository, a release bundle, command-line arguments, or deployment
-logs:
+## Publish the deployment bundle
 
-```sh
-export MAIN_WIFI_PASSWORD='...'
-export SECONDARY_WIFI_PASSWORD='...'
-export GUEST_WIFI_PASSWORD='...'
-export IOT_WIFI_PASSWORD='...'
-export VPN_IF='wgserver'
-export VPN_PORT='51820'
-export VPN_KEY='...'
-export VPN_ADDR='10.10.0.1/24'
-export VPN_ADDR6='fd10::1/64'
-export VPN_PUB='...'
-export VPN_PSK='...'
-./setup.sh --recovery-ready
-```
-
-Setup validates every required variable, Wi-Fi password lengths, WireGuard key
-shape, the port range, address families, and a safe UCI interface name before
-the first router mutation. Wi-Fi keys are injected only into the protected
-transaction candidate. WireGuard non-secret template values are rendered into a
-transaction-local overlay, while private and preshared keys are injected directly
-into the mode-0600 candidate and never printed by the scripts.
-
-## Immutable bundle publication
-
-Build the single deployment artifact from the repository root:
+From the repository root, build `router-config-bundle.tar.gz` with:
 
 ```sh
 tools/build-router-config-bundle.sh ./router-config-bundle.tar.gz
 ```
 
-Publish that exact archive as `router-config-bundle.tar.gz` on an immutable
-GitHub release. Update `ROUTER_CONFIG_BUNDLE_VERSION` and
-`ROUTER_CONFIG_BUNDLE_SHA256` together in `setup.sh` using the release tag and
-the digest printed by the builder. The bundle contains the transaction helper,
-rollback init script, overlays, DNSCrypt configuration, and every module. Setup
-verifies the archive digest and refuses missing or empty members before package
-installation or configuration changes.
+Publish that exact file on an immutable GitHub release. Then update
+`ROUTER_CONFIG_BUNDLE_VERSION` and `ROUTER_CONFIG_BUNDLE_SHA256` together in
+`setup.sh` using the release tag and the digest printed by the build command.
 
-Provisioning supports fresh OpenWrt 25.12 or newer installations with official
-`apk` feeds and at least 256 MB RAM. It uses `apk` exclusively and does not
-preserve or migrate an existing ad-blocking configuration.
+## Run on the OpenWrt router
 
-## Confirmation and rollback
+The maintainer must first publish the immutable configuration bundle and replace
+the version and SHA-256 placeholders in `setup.sh`. A checkout containing those
+placeholders will deliberately refuse to run.
 
-Before running setup, create a configuration backup and establish a tested
-local Ethernet or serial recovery path. Do not rely on the same remote path
-that the VLAN transaction changes. During apply, setup prints a confirmation
-command containing the transaction ID and waits. From a second local or
-recovery-capable session, inspect connectivity and run the printed command,
-which has this form:
+1. Copy the pinned setup script to the router from your workstation:
 
-```sh
-/usr/libexec/router-config confirm TRANSACTION_ID
-```
+   ```sh
+   cd /path/to/openwrt
+   scp setup.sh root@ROUTER_ADDRESS:/root/setup.sh
+   ```
 
-If confirmation does not arrive within the configured timeout (five minutes by
-default), the watchdog restores all six UCI packages and the DNSCrypt file. The early-boot rollback
-service also restores a transaction left pending across a reboot. To revert a
-confirmed transaction deliberately:
+2. Open two local or recovery-capable sessions to the router. In the first,
+   create a backup and protect the script:
+
+   ```sh
+   ssh root@ROUTER_ADDRESS
+   sysupgrade -b /tmp/openwrt-backup.tar.gz
+   chmod 700 /root/setup.sh
+   ```
+
+   From a workstation terminal, copy `/tmp/openwrt-backup.tar.gz` off the router
+   before continuing:
+
+   ```sh
+   scp root@ROUTER_ADDRESS:/tmp/openwrt-backup.tar.gz ./openwrt-backup.tar.gz
+   ```
+
+3. In the same router session, export the deployment secrets. Replace every
+   example value; do not save real values in this repository or pass them as
+   command-line arguments:
+
+   ```sh
+   export MAIN_WIFI_PASSWORD='replace-me'
+   export SECONDARY_WIFI_PASSWORD='replace-me'
+   export GUEST_WIFI_PASSWORD='replace-me'
+   export IOT_WIFI_PASSWORD='replace-me'
+   export VPN_IF='wgserver'
+   export VPN_PORT='51820'
+   export VPN_KEY='replace-with-server-private-key'
+   export VPN_ADDR='10.10.0.1/24'
+   export VPN_ADDR6='fd10::1/64'
+   export VPN_PUB='replace-with-client-public-key'
+   export VPN_PSK='replace-with-preshared-key'
+   /root/setup.sh --recovery-ready
+   ```
+
+4. Keep the first session open. Test management access, DHCP, DNS, and expected
+   internet access from the appropriate VLANs. In the second recovery-capable
+   session, run the exact confirmation command printed by setup:
+
+   ```sh
+   /usr/libexec/router-config confirm TRANSACTION_ID
+   ```
+
+If confirmation is not received within five minutes, or the router reboots with
+a pending transaction, the saved configuration is restored. A confirmed change
+can be reverted later with:
 
 ```sh
 /usr/libexec/router-config rollback TRANSACTION_ID
 ```
 
-Backups and candidates are stored under `/root/router-config-backups` with
-checksummed manifests. Keep a separate off-router backup as well; automatic
-rollback cannot substitute for a physical recovery path.
+Package installation and init-service enablement happen before the protected
+configuration transaction and are not removed by rollback. Backups are kept in
+`/root/router-config-backups`; retain the separate off-router backup too.
 
-The files in `uci/` are feature-oriented UCI batch overlays and may update more
-than one package. They update named project sections in an existing router
-configuration; they are not complete replacements. The router must retain its
-base loopback, globals, WAN, WAN6, firewall defaults, WAN zone, `br_lan` device,
-one unambiguous dnsmasq section, and the package-generated adblock-fast config.
-`ROUTER_CONFIG_UCI_DIR` overrides their location; the older
-`ROUTER_CONFIG_OVERLAY_DIR` remains a compatibility fallback.
+## Module reference
 
-## How the files connect
+The modules run in a fixed order and are internal files sourced by `setup.sh` or
+the transaction helper. They are not standalone commands.
 
-The shared name is the link between the three configurations:
-
-```text
-wireless.<section>.network
-            |
-            v
-network.<interface name>
-            |
-            v
-firewall.<zone>.network
-```
-
-Example for the guest network:
-
-```text
-SSID PixelGuest
-  wireless.pixelguest.network = pixelguest
-                         |
-                         v
-  network.pixelguest = br-lan.2 / 192.168.2.1/24
-                         |
-                         v
-  firewall.pixelguest.network = pixelguest
-```
-
-The complete mapping is:
-
-| Purpose | SSID | Wireless radio | Network interface | VLAN | Router address | Firewall zone |
-|---|---|---|---|---:|---|---|
-| Main | `PixelMain` | `radio0` | `pixelmain` | 1 | `192.168.1.1/24` | `pixelmain` |
-| Guest | `PixelGuest` | `radio0` | `pixelguest` | 2 | `192.168.2.1/24` | `pixelguest` |
-| IoT | `PixelIoT` | `radio0` | `pixeliot` | 3 | `192.168.3.1/24` | `pixeliot` |
-| Secondary | `PixelSecondary` | `radio0` | `pixelsecondary` | 4 | `192.168.4.1/24` | `pixelsecondary` |
-
-All four SSIDs use WPA3-SAE. Passwords are not stored in the overlay;
-`router-config.sh` injects them while preparing the candidate configuration.
-
-## Network and VLANs
-
-`uci/network` defines four bridge VLANs on the existing `br-lan`
-device and assigns one static interface to each VLAN.
-
-```text
-br-lan
-  |
-  +-- VLAN 1 -- br-lan.1 -- pixelmain      -- 192.168.1.1/24
-  +-- VLAN 2 -- br-lan.2 -- pixelguest     -- 192.168.2.1/24
-  +-- VLAN 3 -- br-lan.3 -- pixeliot       -- 192.168.3.1/24
-  `-- VLAN 4 -- br-lan.4 -- pixelsecondary -- 192.168.4.1/24
-```
-
-Only `pixelmain` requests IPv6 prefix assignment, with `ip6assign='60'`.
-
-Ethernet port membership:
-
-```text
-             VLAN 1       VLAN 2       VLAN 3       VLAN 4
-lan1         untagged      tagged       tagged       tagged
-lan2         untagged        -            -            -
-lan3         untagged        -            -            -
-lan4         untagged        -            -            -
-```
-
-`lan1` is therefore an untagged Main port plus a tagged trunk for Guest, IoT,
-and Secondary. `lan2` through `lan4` are untagged Main ports. The `*` on each
-`lanN:u*` entry makes VLAN 1 the port's primary VLAN ID.
-
-## Wireless
-
-`uci/wireless` creates four access points on `radio0`. Each AP's
-`network` option attaches it to the logical interface with the same name:
-
-```text
-radio0
-  |
-  +-- PixelMain      -- pixelmain      -- br-lan.1
-  +-- PixelGuest     -- pixelguest     -- br-lan.2
-  +-- PixelIoT       -- pixeliot       -- br-lan.3
-  `-- PixelSecondary -- pixelsecondary -- br-lan.4
-```
-
-The radio and Ethernet port names are device-specific. This configuration
-assumes the target provides `radio0`, `br-lan`, and `lan1` through `lan4`.
-
-## Firewall policy
-
-`uci/firewall` places each logical network in a firewall zone of
-the same name. Forwarding is allowlisted; any path not shown as allowed is
-rejected by the zone policies.
-
-```text
-Internet forwarding:
-  PixelMain      ----> WAN
-  PixelGuest     ----> WAN
-  PixelSecondary ----> WAN
-  PixelIoT       --X-> WAN
-
-Inter-VLAN forwarding:
-  PixelMain ----> PixelGuest
-  PixelMain ----> PixelSecondary
-  PixelMain ----> PixelIoT
-
-  PixelGuest, PixelSecondary, and PixelIoT --X-> other VLANs
-
-Allowed routed flows:
-  PixelMain      -> WAN, PixelGuest, PixelSecondary, PixelIoT
-  PixelGuest     -> WAN
-  PixelSecondary -> WAN
-  PixelIoT       -> none
-```
-
-Access to services on the router itself:
-
-| Zone | Input to router | Explicit exceptions |
-|---|---|---|
-| `pixelmain` | Accepted | Not required |
-| `pixelguest` | Rejected | DNS and DHCP: ports 53, 67, 68 TCP/UDP |
-| `pixelsecondary` | Rejected | DNS and DHCP: ports 53, 67, 68 TCP/UDP |
-| `pixeliot` | Rejected | DNS and DHCP: ports 53, 67, 68 TCP/UDP |
-
-Zone output is accepted for Main, Guest, and Secondary, but rejected for IoT.
-Zone forwarding defaults to reject for all four zones; only the forwarding
-sections listed above create inter-zone paths.
-
-## DHCP and base configuration
-
-`uci/network` creates a named DHCP pool for each managed VLAN with `ignore=0`,
-`start=100`, `limit=150`, and `leasetime=12h`. On each `/24`, dnsmasq therefore
-offers `.100` through `.249`, following the [OpenWrt DHCP pool
-semantics](https://openwrt.org/docs/guide-user/base-system/dhcp). Unrelated DHCP sections are preserved. A single
-stock anonymous dnsmasq section is named `dhcp.dnsmasq` only in the candidate by
-UCI export/rewrite/import; missing, multiple, or differently named dnsmasq
-sections are rejected as ambiguous.
-
-If no DNSCrypt TOML existed before apply, rollback removes the installed file;
-otherwise it restores the checksummed original. Installed packages and init
-enablement remain after rollback, with restored configuration controlling their
-subsequent behavior.
-
-Service coordination uses standard OpenWrt init actions as documented in
-[Managing services](https://openwrt.org/docs/guide-user/base-system/managing_services).
-
-Before applying network, firewall, or wireless changes, back up the router and
-have a local Ethernet or serial recovery path. Validate the staged configuration
-on the exact router model and OpenWrt release; these overlays depend on existing
-base sections and device-specific port and radio names.
+- [Base packages](docs/base-packages.md)
+- [Network and DHCP](docs/network.md)
+- [Firewall](docs/firewall.md)
+- [Wireless](docs/wireless.md)
+- [Encrypted DNS](docs/dns-over-https.md)
+- [Ad blocking](docs/adblock-fast.md)
+- [WireGuard](docs/wireguard.md)
