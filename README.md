@@ -109,6 +109,19 @@ Package installation and init-service enablement happen before the protected
 configuration transaction and are not removed by rollback. Backups are kept in
 `/root/router-config-backups`; retain the separate off-router backup too.
 
+## Development checks
+
+Run the Python integration suite concurrently across the available development
+container CPUs:
+
+```sh
+python tools/run-tests.py
+```
+
+Use `--workers 1` for a serial run or `--workers N` to select another level of
+concurrency. Each test uses its own simulated router filesystem; these tests do
+not apply configuration to a router.
+
 ## Module reference
 
 The modules run in a fixed order and are internal files sourced by `setup.sh` or
