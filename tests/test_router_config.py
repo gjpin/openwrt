@@ -1,9 +1,7 @@
 import json
-import hashlib
 import os
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -527,89 +525,19 @@ exec /usr/bin/cp "$@"
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
-def test_bundle_contains_every_module(tmp_path):
-    archive = tmp_path / "router-config-bundle.tar.gz"
-    subprocess.run(
-        [str(REPO / "tools" / "build-router-config-bundle.sh"), str(archive)],
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-    with tarfile.open(archive) as bundle:
-        members = set(bundle.getnames())
-    expected = {
-        f"modules/{name}.sh"
-        for name in (
-            "base-packages", "network", "firewall", "wireless",
-            "dns-over-https", "adblock-fast", "wireguard",
-        )
-    }
-    assert expected <= members
-    assert {
-        f"uci/{name}" for name in (
-            "network", "firewall", "wireless", "dns-over-https",
-            "adblock-fast", "wireguard",
-        )
-    } <= members
-    assert not any(member.startswith("configs/") for member in members)
-    retired_name = "adblock" + "-lean"
-    assert not any(retired_name in member for member in members)
-
-
-def test_setup_rejects_tampered_and_incomplete_bundles_before_mutation(router):
+def test_setup_rejects_an_incomplete_repository_before_mutation(router):
     root, _, _, _, env = router
-    good_archive = root / "good.tar.gz"
-    subprocess.run(
-        [str(REPO / "tools" / "build-router-config-bundle.sh"), str(good_archive)],
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-    good_digest = hashlib.sha256(good_archive.read_bytes()).hexdigest()
-    setup_source = (REPO / "setup.sh").read_text().replace(
-        "REPLACE_WITH_IMMUTABLE_VERSION", "test-v1"
-    ).replace("REPLACE_WITH_64_CHARACTER_SHA256", good_digest)
     setup_copy = root / "setup.sh"
-    write_executable(setup_copy, setup_source)
+    write_executable(setup_copy, (REPO / "setup.sh").read_text())
     mutation_marker = root / "mutation-attempted"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{mutation_marker}'\n")
     key = "A" * 43 + "="
-    env.update({
-        "VPN_IF": "wgserver", "VPN_PORT": "51820", "VPN_KEY": key,
-        "VPN_ADDR": "10.10.0.1/24", "VPN_ADDR6": "fd10::1/64",
-        "VPN_PUB": key, "VPN_PSK": key,
-    })
-
-    tampered_archive = root / "tampered.tar.gz"
-    tampered_archive.write_bytes(good_archive.read_bytes() + b"tampered")
-    write_executable(
-        root / "bin" / "uclient-fetch",
-        f"#!/bin/sh\ncp '{tampered_archive}' \"$3\"\n",
-    )
+    env.update({"VPN_KEY": key, "VPN_PUB": key, "VPN_PSK": key})
     result = subprocess.run(
         [str(setup_copy), "--recovery-ready"], env=env, text=True, capture_output=True,
     )
     assert result.returncode != 0
-    assert "FAILED" in result.stdout + result.stderr
-    assert not mutation_marker.exists()
-
-    incomplete_archive = root / "incomplete.tar.gz"
-    with tarfile.open(incomplete_archive, "w:gz") as bundle:
-        bundle.add(REPO / "router-config.sh", arcname="router-config.sh")
-    incomplete_digest = hashlib.sha256(incomplete_archive.read_bytes()).hexdigest()
-    write_executable(
-        setup_copy,
-        setup_source.replace(good_digest, incomplete_digest),
-    )
-    write_executable(
-        root / "bin" / "uclient-fetch",
-        f"#!/bin/sh\ncp '{incomplete_archive}' \"$3\"\n",
-    )
-    result = subprocess.run(
-        [str(setup_copy), "--recovery-ready"], env=env, text=True, capture_output=True,
-    )
-    assert result.returncode != 0
-    assert "bundle member is missing or empty" in result.stderr
+    assert "repository file is missing or empty" in result.stderr
     assert not mutation_marker.exists()
 
 
@@ -617,7 +545,6 @@ def test_setup_validates_all_inputs_before_mutation(router):
     root, _, _, _, env = router
     marker = root / "mutation-attempted"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{marker}'\n")
-    write_executable(root / "bin" / "uclient-fetch", f"#!/bin/sh\ntouch '{marker}'\n")
     key = "A" * 43 + "="
     env.update({
         "VPN_IF": "bad-name;unsafe",
@@ -753,6 +680,9 @@ def test_setup_declares_fixed_module_order_and_all_members():
         "dns-over-https", "adblock-fast", "wireguard",
     ):
         assert f"modules/{name}.sh" in source
+    assert "SCRIPT_DIR=$(CDPATH=" in source
+    assert "uclient-fetch" not in source
+    assert "ROUTER_CONFIG_" + "BUNDLE" not in source
     assert "adblock" + "-lean" not in source
     assert "--recovery-ready" in source
     assert "dns_over_https_run" not in source

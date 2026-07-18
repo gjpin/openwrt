@@ -8,11 +8,7 @@ set -eu
     exit 2
 }
 
-# Publish the bundle as an immutable GitHub release asset, then replace both
-# values together. Deployment is refused while either placeholder remains.
-ROUTER_CONFIG_BUNDLE_VERSION='REPLACE_WITH_IMMUTABLE_VERSION'
-ROUTER_CONFIG_BUNDLE_SHA256='REPLACE_WITH_64_CHARACTER_SHA256'
-ROUTER_CONFIG_BUNDLE_URL="https://github.com/gjpin/openwrt/releases/download/${ROUTER_CONFIG_BUNDLE_VERSION}/router-config-bundle.tar.gz"
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
 die() {
     printf 'setup: %s\n' "$*" >&2
@@ -47,6 +43,20 @@ validate_wireguard_key() {
         *=) : ;;
         *) die "$variable_name is not a padded WireGuard key" ;;
     esac
+}
+
+validate_repository() {
+    for repository_file in \
+        router-config.sh router-config-rollback.init \
+        uci/network uci/firewall uci/wireless uci/dns-over-https \
+        uci/adblock-fast uci/wireguard \
+        modules/base-packages.sh modules/network.sh modules/firewall.sh \
+        modules/wireless.sh modules/dns-over-https.sh modules/adblock-fast.sh \
+        modules/wireguard.sh; do
+        [ -f "$SCRIPT_DIR/$repository_file" ] && [ -s "$SCRIPT_DIR/$repository_file" ] ||
+            die "repository file is missing or empty: $repository_file"
+    done
+    [ -x "$SCRIPT_DIR/router-config.sh" ] || die 'router-config.sh is not executable'
 }
 
 validate_inputs() {
@@ -88,60 +98,33 @@ validate_inputs() {
     validate_wireguard_key VPN_KEY
     validate_wireguard_key VPN_PUB
     validate_wireguard_key VPN_PSK
-
-    case $ROUTER_CONFIG_BUNDLE_VERSION in
-        REPLACE_*) die 'publish an immutable router-config bundle and set its version first' ;;
-    esac
-    case $ROUTER_CONFIG_BUNDLE_SHA256 in
-        *[!0-9a-f]* | '') die 'bundle SHA-256 must be 64 lowercase hexadecimal characters' ;;
-    esac
-    [ "${#ROUTER_CONFIG_BUNDLE_SHA256}" -eq 64 ] || die 'bundle SHA-256 must contain exactly 64 characters'
 }
 
 # Validate the entire public environment contract before the first router
 # mutation. Error messages intentionally name variables but never print values.
 validate_inputs
+validate_repository
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
 export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_ADDR6 VPN_PUB VPN_PSK
 
-bundle_archive=$(mktemp /tmp/router-config-bundle.XXXXXX.tar.gz)
-bundle_directory=$(mktemp -d /tmp/router-config-bundle.XXXXXX)
-cleanup() {
-    rm -f "$bundle_archive"
-    rm -rf "$bundle_directory"
-}
-trap 'cleanup' EXIT HUP INT TERM
-
-uclient-fetch "$ROUTER_CONFIG_BUNDLE_URL" -O "$bundle_archive"
-[ -s "$bundle_archive" ] || die 'router-config bundle download is empty'
-printf '%s  %s\n' "$ROUTER_CONFIG_BUNDLE_SHA256" "$bundle_archive" | sha256sum -c -
-tar -xzf "$bundle_archive" -C "$bundle_directory"
-for bundle_file in \
-    router-config.sh router-config-rollback.init \
-    uci/network uci/firewall uci/wireless uci/dns-over-https \
-    uci/adblock-fast uci/wireguard \
-    modules/base-packages.sh modules/network.sh modules/firewall.sh \
-    modules/wireless.sh modules/dns-over-https.sh modules/adblock-fast.sh \
-    modules/wireguard.sh; do
-    [ -f "$bundle_directory/$bundle_file" ] && [ -s "$bundle_directory/$bundle_file" ] ||
-        die "bundle member is missing or empty: $bundle_file"
-done
-chmod 700 "$bundle_directory/router-config.sh"
-
 # Modules are internal sourced files. Their fixed order is part of the setup
 # contract and is deliberately not user-selectable.
-. "$bundle_directory/modules/base-packages.sh"
-. "$bundle_directory/modules/dns-over-https.sh"
-. "$bundle_directory/modules/adblock-fast.sh"
-. "$bundle_directory/modules/wireguard.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/modules/base-packages.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/modules/dns-over-https.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/modules/adblock-fast.sh"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/modules/wireguard.sh"
 
 base_packages_run
 dns_over_https_install
 adblock_fast_install
 wireguard_install
 
-prepare_output=$("$bundle_directory/router-config.sh" prepare --recovery-ready)
+prepare_output=$("$SCRIPT_DIR/router-config.sh" prepare --recovery-ready)
 printf '%s\n' "$prepare_output"
 transaction_id=$(printf '%s\n' "$prepare_output" | sed -n '$p')
 [ -n "$transaction_id" ] || die 'router-config did not return a transaction ID'
-"$bundle_directory/router-config.sh" apply "$transaction_id"
+"$SCRIPT_DIR/router-config.sh" apply "$transaction_id"

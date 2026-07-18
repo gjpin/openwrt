@@ -69,11 +69,10 @@ or wireless file can disconnect the router and require local recovery.
   and `VPN_PSK`; Wi-Fi rendering depends on the four password variables.
 - Keep operations idempotent. Re-running the script must not append duplicate UCI
   rules, redirects, list entries, or sections.
-- Download to a temporary file, verify that the download succeeded and is not
-  empty, then install it. Do not overwrite a live config directly from a URL.
-- The setup script downloads an immutable release bundle from this repository.
-  When changing a checked-in overlay, rebuild and publish the bundle, then update
-  its pinned version and checksum together so deployment cannot use stale files.
+- Resolve companion files relative to `setup.sh`, and reject a missing or empty
+  repository file before the first router mutation.
+- Deployment uses the current GitHub `main` source archive directly; there are no
+  generated release artifacts to rebuild or publish after changing an overlay.
 - Avoid unpinned remote installer execution. If an upstream installer must be
   used, pin a reviewed version or commit and document its provenance/checksum.
 - Group related UCI mutations, commit once per package, and reload services only

@@ -29,38 +29,14 @@ First make an off-router configuration backup and verify a recovery path through
 local Ethernet or serial. `setup.sh` must run on the target router as `root`; do
 not run it on a workstation.
 
-## Publish the deployment bundle
-
-From the repository root, build `router-config-bundle.tar.gz` with:
-
-```sh
-tools/build-router-config-bundle.sh ./router-config-bundle.tar.gz
-```
-
-Publish that exact file on an immutable GitHub release. Then update
-`ROUTER_CONFIG_BUNDLE_VERSION` and `ROUTER_CONFIG_BUNDLE_SHA256` together in
-`setup.sh` using the release tag and the digest printed by the build command.
-
 ## Run on the OpenWrt router
 
-The maintainer must first publish the immutable configuration bundle and replace
-the version and SHA-256 placeholders in `setup.sh`. A checkout containing those
-placeholders will deliberately refuse to run.
-
-1. Copy the pinned setup script to the router from your workstation:
-
-   ```sh
-   cd /path/to/openwrt
-   scp setup.sh root@ROUTER_ADDRESS:/root/setup.sh
-   ```
-
-2. Open two local or recovery-capable sessions to the router. In the first,
-   create a backup and protect the script:
+1. Open two local or recovery-capable sessions to the router. In the first,
+   create a backup:
 
    ```sh
    ssh root@ROUTER_ADDRESS
    sysupgrade -b /tmp/openwrt-backup.tar.gz
-   chmod 700 /root/setup.sh
    ```
 
    From a workstation terminal, copy `/tmp/openwrt-backup.tar.gz` off the router
@@ -70,7 +46,25 @@ placeholders will deliberately refuse to run.
    scp root@ROUTER_ADDRESS:/tmp/openwrt-backup.tar.gz ./openwrt-backup.tar.gz
    ```
 
-3. In the same router session, export the deployment secrets. Replace every
+2. In the router session, download and extract the current `main` source archive.
+   Git is not required. A fresh temporary directory avoids mixing files from an
+   earlier download:
+
+   ```sh
+   set -eu
+   archive="/tmp/openwrt-main.$$.tar.gz"
+   source_root="/tmp/openwrt-source.$$"
+   mkdir -p "$source_root"
+   uclient-fetch 'https://github.com/gjpin/openwrt/archive/refs/heads/main.tar.gz' -O "$archive"
+   [ -s "$archive" ] || { printf '%s\n' 'OpenWrt configuration download is empty' >&2; exit 1; }
+   tar -xzf "$archive" -C "$source_root"
+   cd "$source_root/openwrt-main"
+   ```
+
+   This intentionally follows the mutable `main` branch without a pinned digest.
+   Review the current repository state before running it on a router.
+
+3. Export the deployment secrets. Replace every
    example value; do not save real values in this repository or pass them as
    command-line arguments:
 
@@ -86,7 +80,7 @@ placeholders will deliberately refuse to run.
    export VPN_ADDR6='fd10::1/64'
    export VPN_PUB='replace-with-client-public-key'
    export VPN_PSK='replace-with-preshared-key'
-   /root/setup.sh --recovery-ready
+   ./setup.sh --recovery-ready
    ```
 
 4. Keep the first session open. Test management access, DHCP, DNS, and expected
