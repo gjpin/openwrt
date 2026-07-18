@@ -120,7 +120,6 @@ for bundle_file in \
     router-config.sh router-config-rollback.init \
     uci/network uci/firewall uci/wireless uci/dns-over-https \
     uci/adblock-fast uci/wireguard \
-    configs/dnscrypt/dnscrypt-proxy.toml \
     modules/base-packages.sh modules/network.sh modules/firewall.sh \
     modules/wireless.sh modules/dns-over-https.sh modules/adblock-fast.sh \
     modules/wireguard.sh; do

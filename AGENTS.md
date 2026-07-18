@@ -8,11 +8,12 @@ or wireless file can disconnect the router and require local recovery.
 
 ## Repository map
 
-- `setup.sh` installs packages and applies DNSCrypt, ad blocking, firewall, and
+- `setup.sh` installs packages and applies encrypted DNS, ad blocking, firewall, and
   WireGuard settings on an OpenWrt router.
 - `uci/` contains feature-oriented UCI batch overlays for network, firewall,
   wireless, DNS, adblock-fast, and WireGuard configuration.
-- `configs/dnscrypt/dnscrypt-proxy.toml` is the deployed dnscrypt-proxy2 config.
+- `uci/dns-over-https` contains the managed `https-dns-proxy` instances and
+  coordinated dnsmasq settings.
 
 ## Environment and execution safety
 
@@ -54,9 +55,8 @@ or wireless file can disconnect the router and require local recovery.
 - Shell variables are not expanded merely by copying a UCI file. If templates are
   used, render them explicitly and verify that no literal `${...}` placeholder or
   extra quote remains before installation.
-- Keep dnsmasq's upstream address identical to `listen_addresses` in
-  `dnscrypt-proxy.toml`, and verify that the two daemons do not contend for the
-  same address and port.
+- Keep dnsmasq's upstream list identical to the named `https-dns-proxy` listen
+  ports, and verify that the two daemons do not contend for the same ports.
 
 ## Editing `setup.sh`
 
@@ -101,8 +101,8 @@ uci show network
 uci show firewall
 uci show wireless
 fw4 check
-dnscrypt-proxy -check -config /etc/dnscrypt-proxy2/dnscrypt-proxy.toml
-logread -e netifd -e firewall -e dnscrypt-proxy
+uci show https-dns-proxy
+logread -e netifd -e firewall -e https-dns-proxy
 ```
 
 Confirm from a client in each VLAN that DHCP and DNS work, expected internet
@@ -113,7 +113,5 @@ use the release-appropriate equivalent rather than silently skipping the check.
 
 ## Change scope
 
-- Do not make unrelated formatting changes to the large dnscrypt-proxy example
-  config; change only the active setting and nearby explanatory comment.
 - In the final report, list files changed, static checks run, checks that require
   real router hardware, and any lockout, secret-handling, or compatibility risk.

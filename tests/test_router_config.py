@@ -30,7 +30,8 @@ while args and args[0].startswith("-"):
 
 def load(package):
     with open(os.path.join(config_dir, package), encoding="utf-8") as f:
-        return json.load(f)
+        content = f.read()
+        return json.loads(content) if content.strip() else {}
 
 def save(package, data):
     with open(os.path.join(config_dir, package), "w", encoding="utf-8") as f:
@@ -190,7 +191,13 @@ def router():
     }
     system = {"ntp": {".type": "timeserver", "server": ["old"]}, "unrelated": {".type": "system", "hostname": "keep"}}
     adblock = {"config": {".type": "adblock-fast", "enabled": "0"}, "unmanaged": {".type": "file_url", "name": "Keep me"}}
-    for name, value in (("network", network), ("firewall", firewall), ("wireless", wireless), ("dhcp", dhcp), ("system", system), ("adblock-fast", adblock)):
+    https_dns_proxy = {
+        "config": {".type": "main", "dnsmasq_config_update": "*", "force_dns": "1", "notrack_dns": "1"},
+        "@https-dns-proxy[0]": {".type": "https-dns-proxy", "resolver_url": "https://cloudflare-dns.com/dns-query", "listen_port": "5053"},
+        "@https-dns-proxy[1]": {".type": "https-dns-proxy", "resolver_url": "https://dns.google/dns-query", "listen_port": "5054"},
+        "unmanaged": {".type": "https-dns-proxy", "resolver_url": "https://example.invalid/dns-query", "listen_port": "5999"},
+    }
+    for name, value in (("network", network), ("firewall", firewall), ("wireless", wireless), ("dhcp", dhcp), ("system", system), ("https-dns-proxy", https_dns_proxy), ("adblock-fast", adblock)):
         (config / name).write_text(json.dumps(value))
 
     write_executable(bin_dir / "uci", UCI_STUB)
@@ -203,7 +210,6 @@ fi
 exit 0
 ''')
     write_executable(bin_dir / "fw4", "#!/bin/sh\n[ ! -e \"${FW4_FAIL_FILE:-/nonexistent}\" ]\n")
-    write_executable(bin_dir / "dnscrypt-proxy", "#!/bin/sh\n[ ! -e \"${DNSCRYPT_FAIL_FILE:-/nonexistent}\" ]\n")
     service_source = '''#!/bin/sh
 service_name=${0##*/}
 if [ -e "${SERVICE_FAIL_ONCE:-/nonexistent}" ] &&
@@ -216,7 +222,7 @@ fi
 exit 0
 '''
     services = {}
-    for name in ("network-init", "firewall-init", "sysntpd-init", "dnscrypt-init", "dnsmasq-init", "adblock-init"):
+    for name in ("network-init", "firewall-init", "sysntpd-init", "https-dns-proxy-init", "dnsmasq-init", "adblock-init"):
         services[name] = bin_dir / name
         write_executable(services[name], service_source)
 
@@ -235,11 +241,9 @@ exit 0
         "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
         "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
         "ROUTER_CONFIG_SYSNTPD_INIT": str(services["sysntpd-init"]),
-        "ROUTER_CONFIG_DNSCRYPT_INIT": str(services["dnscrypt-init"]),
+        "ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT": str(services["https-dns-proxy-init"]),
         "ROUTER_CONFIG_DNSMASQ_INIT": str(services["dnsmasq-init"]),
         "ROUTER_CONFIG_ADBLOCK_INIT": str(services["adblock-init"]),
-        "ROUTER_CONFIG_DNSCRYPT_CONFIG": str(tmp_path / "dnscrypt-live.toml"),
-        "ROUTER_CONFIG_DNSCRYPT_SOURCE": str(REPO / "configs/dnscrypt/dnscrypt-proxy.toml"),
         "ROUTER_CONFIG_TIMEOUT": "2",
         "ROUTER_CONFIG_POLL_INTERVAL": "0.05",
         "PIXEL_WIFI_PASSWORD": "pixel-secret-123",
@@ -290,7 +294,27 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
             "start": "100", "limit": "150", "leasetime": "12h",
         }
     assert dhcp["unrelated"]["ignore"] == "1"
-    assert dhcp["dnsmasq"]["server"] == ["127.0.0.53#53"]
+    assert dhcp["dnsmasq"]["server"] == [
+        "127.0.0.1#5053", "127.0.0.1#5054", "127.0.0.1#5055", "127.0.0.1#5056",
+    ]
+    assert dhcp["dnsmasq"]["noresolv"] == "1"
+    assert dhcp["dnsmasq"]["cachesize"] == "4096"
+    proxy = json.loads((transaction_dir / "candidate" / "https-dns-proxy").read_text())
+    assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
+    assert proxy["config"] == {
+        ".type": "main", "dnsmasq_config_update": "-", "force_dns": "0", "notrack_dns": "0",
+    }
+    expected_proxy = {
+        "quad9": ("https://dns.quad9.net/dns-query", "5053"),
+        "cloudflare_security": ("https://security.cloudflare-dns.com/dns-query", "5054"),
+        "control_d_ads_tracking": ("https://freedns.controld.com/p2", "5055"),
+        "mullvad_base": ("https://base.dns.mullvad.net/dns-query", "5056"),
+    }
+    for name, (url, port) in expected_proxy.items():
+        assert proxy[name] == {
+            ".type": "https-dns-proxy", "resolver_url": url, "listen_port": port,
+            "bootstrap_dns": "9.9.9.11,1.1.1.1,8.8.8.8",
+        }
     adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
     sources = {name: section for name, section in adblock.items() if section[".type"] == "file_url"}
     assert "unmanaged" not in adblock
@@ -306,7 +330,9 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert all(section["action"] == "block" and section["enabled"] == "1" for section in sources.values())
     assert sources["peter_lowe"]["url"].endswith("&mimetype=plaintext")
     assert "/adblock/doh-vpn-proxy-bypass.txt" in sources["hagezi_dns_bypass"]["url"]
-    assert (transaction_dir / "backup" / "dnscrypt-proxy.missing").exists()
+    manifest = (transaction_dir / "manifest.sha256").read_text()
+    assert "backup/https-dns-proxy" in manifest
+    assert "candidate/https-dns-proxy" in manifest
     assert (transaction_dir / "candidate" / "wireless").stat().st_mode & 0o777 == 0o600
     rendered = (transaction_dir / "overlay" / "wireguard").read_text()
     assert env["VPN_KEY"] not in rendered
@@ -317,11 +343,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
 def test_repeated_prepare_is_idempotent(router):
     _, config, backups, _, env = router
     _, first = prepare(env)
-    for name in ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast"):
+    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast"):
         shutil.copy(backups / first / "candidate" / name, config / name)
-    shutil.copy(backups / first / "candidate" / "dnscrypt-proxy.toml", env["ROUTER_CONFIG_DNSCRYPT_CONFIG"])
     _, second = prepare(env)
-    for name in ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast"):
+    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast"):
         data = json.loads((backups / second / "candidate" / name).read_text())
         assert len(data) == len(set(data))
     assert json.loads((backups / second / "candidate" / "network").read_text())["br_lan"]["stp"] == "1"
@@ -359,7 +384,8 @@ def test_missing_transaction_module_is_rejected(router):
 
 def test_apply_confirm_and_manual_rollback(router):
     _, config, backups, _, env = router
-    originals = {name: (config / name).read_text() for name in ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast")}
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
+    originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
     process = subprocess.Popen(
         [str(REPO / "router-config.sh"), "apply", transaction], env=env,
@@ -380,10 +406,10 @@ def test_apply_confirm_and_manual_rollback(router):
     assert process.returncode == 0, stderr
     assert "confirm" in stdout
     assert json.loads((config / "network").read_text())["pixel"]["ipaddr"] == "192.168.1.1"
-    assert Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"]).exists()
+    proxy = json.loads((config / "https-dns-proxy").read_text())
+    assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
     run_router(env, "rollback", transaction)
     assert {name: (config / name).read_text() for name in originals} == originals
-    assert not Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"]).exists()
 
 
 def test_timeout_and_reboot_recovery_restore_backup(router):
@@ -417,15 +443,14 @@ def test_fw4_failure_does_not_change_live_configuration(router):
 def test_apply_fw4_and_reload_failures_restore_backup(router):
     root, config, backups, _, env = router
     original = (config / "network").read_text()
-    dnscrypt_live = Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"])
-    dnscrypt_live.write_text("original dnscrypt configuration\n")
+    original_proxy = (config / "https-dns-proxy").read_text()
     _, transaction = prepare(env)
     fail_file = root / "fw4-fail"; fail_file.touch(); env["FW4_FAIL_FILE"] = str(fail_file)
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert "backups restored" in result.stderr
     assert (config / "network").read_text() == original
-    assert dnscrypt_live.read_text() == "original dnscrypt configuration\n"
+    assert (config / "https-dns-proxy").read_text() == original_proxy
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
     fail_file.unlink(); env.pop("FW4_FAIL_FILE")
@@ -444,13 +469,13 @@ def test_apply_fw4_and_reload_failures_restore_backup(router):
     ("wifi", "reload"),
     ("firewall-init", "reload"),
     ("sysntpd-init", "restart"),
-    ("dnscrypt-init", "restart"),
+    ("https-dns-proxy-init", "restart"),
     ("dnsmasq-init", "restart"),
     ("adblock-init", "restart"),
 ])
 def test_each_coordinated_service_failure_restores_every_file(router, service_name, action):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
     originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
     fail = root / f"{service_name}-fail"
@@ -465,7 +490,6 @@ def test_each_coordinated_service_failure_restores_every_file(router, service_na
     assert result.returncode != 0
     assert "service reload failed" in result.stderr
     assert {name: (config / name).read_text() for name in names} == originals
-    assert not Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"]).exists()
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
@@ -483,7 +507,7 @@ def test_transaction_tampering_is_rejected(router):
 
 def test_partial_candidate_installation_failure_restores_all_packages(router):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
     originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
     fail = root / "install-fail"
@@ -527,7 +551,7 @@ def test_bundle_contains_every_module(tmp_path):
             "adblock-fast", "wireguard",
         )
     } <= members
-    assert not any(member.startswith("configs/openwrt") for member in members)
+    assert not any(member.startswith("configs/") for member in members)
     retired_name = "adblock" + "-lean"
     assert not any(retired_name in member for member in members)
 
@@ -651,45 +675,42 @@ def test_missing_or_ambiguous_dnsmasq_is_rejected(router, sections):
     assert not backups.exists()
 
 
-def test_dnscrypt_validation_and_endpoint_mismatch_are_preapply_failures(router):
-    root, config, _, _, env = router
+def test_https_dns_proxy_validation_and_forward_mismatch_are_preapply_failures(router):
+    _, config, backups, overlays, env = router
     original = (config / "network").read_text()
-    fail = root / "dnscrypt-fail"
-    fail.touch()
-    env["DNSCRYPT_FAIL_FILE"] = str(fail)
+    with (overlays / "dns-over-https").open("a") as stream:
+        stream.write("\nset https-dns-proxy.quad9.resolver_url='https://example.invalid/dns-query'\n")
     result = run_router(env, "prepare", "--recovery-ready", check=False)
-    assert "DNSCrypt rejected candidate" in result.stderr
+    assert "unexpected https-dns-proxy URL for quad9" in result.stderr
     assert (config / "network").read_text() == original
 
-    fail.unlink()
-    env.pop("DNSCRYPT_FAIL_FILE")
-    mismatched = root / "dnscrypt-mismatch.toml"
-    mismatched.write_text(
-        (REPO / "configs/dnscrypt/dnscrypt-proxy.toml").read_text().replace(
-            "127.0.0.53:53", "127.0.0.54:53", 1
+    shutil.rmtree(backups)
+    (overlays / "dns-over-https").write_text(
+        (REPO / "uci/dns-over-https").read_text().replace(
+            "127.0.0.1#5056", "127.0.0.1#5999"
         )
     )
-    env["ROUTER_CONFIG_DNSCRYPT_SOURCE"] = str(mismatched)
     result = run_router(env, "prepare", "--recovery-ready", check=False)
-    assert "does not match dnsmasq upstream" in result.stderr
+    assert "dnsmasq upstreams do not match" in result.stderr
+    assert (config / "network").read_text() == original
 
 
 def test_feature_install_callbacks_only_install_and_enable(router):
     root, config, _, _, env = router
-    names = ("network", "firewall", "dhcp", "adblock-fast")
+    names = ("network", "firewall", "dhcp", "https-dns-proxy", "adblock-fast")
     before = {name: (config / name).read_text() for name in names}
     apk_log = root / "apk.log"
     init_log = root / "init.log"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{apk_log}'\n")
     init = root / "bin" / "init-install"
     write_executable(init, f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{init_log}'\n")
-    env["ROUTER_CONFIG_DNSCRYPT_INIT"] = str(init)
+    env["ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT"] = str(init)
     env["ROUTER_CONFIG_ADBLOCK_INIT"] = str(init)
     run_module(env, "dns-over-https.sh", "dns_over_https_install")
     run_module(env, "adblock-fast.sh", "adblock_fast_install")
     run_module(env, "wireguard.sh", "wireguard_install")
     assert apk_log.read_text().splitlines() == [
-        "add dnscrypt-proxy2",
+        "add https-dns-proxy luci-app-https-dns-proxy",
         "add adblock-fast luci-app-adblock-fast",
         "add wireguard-tools luci-proto-wireguard",
     ]
@@ -711,7 +732,8 @@ def test_all_package_installation_uses_apk(router):
         for path in [REPO / "setup.sh", *(REPO / "modules").glob("*.sh")]
     )
     assert "op" + "kg" not in project_shell
-    assert "apk add dnscrypt-proxy2" in project_shell
+    assert "dns" + "crypt" not in project_shell.lower()
+    assert "apk add https-dns-proxy luci-app-https-dns-proxy" in project_shell
     assert "apk add wireguard-tools luci-proto-wireguard" in project_shell
 
 
@@ -737,3 +759,8 @@ def test_setup_declares_fixed_module_order_and_all_members():
     assert "adblock_fast_run" not in source
     assert "wireguard_run" not in source
     assert "adblock selector" not in (REPO / "README.md").read_text().lower()
+
+    transaction_source = (REPO / "router-config.sh").read_text()
+    assert transaction_source.index('"$HTTPS_DNS_PROXY_INIT" restart') < transaction_source.index(
+        '"$DNSMASQ_INIT" restart'
+    )

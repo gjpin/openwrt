@@ -1,9 +1,34 @@
-# Feature overlay: DNSCrypt upstream, NTP bootstrap, and encrypted-DNS policy.
+# Feature overlay: DoH upstreams, NTP bootstrap, and encrypted-DNS policy.
+
+set https-dns-proxy.config='main'
+set https-dns-proxy.config.dnsmasq_config_update='-'
+set https-dns-proxy.config.force_dns='0'
+set https-dns-proxy.config.notrack_dns='0'
+
+set https-dns-proxy.quad9='https-dns-proxy'
+set https-dns-proxy.quad9.resolver_url='https://dns.quad9.net/dns-query'
+set https-dns-proxy.quad9.listen_port='5053'
+set https-dns-proxy.quad9.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
+set https-dns-proxy.cloudflare_security='https-dns-proxy'
+set https-dns-proxy.cloudflare_security.resolver_url='https://security.cloudflare-dns.com/dns-query'
+set https-dns-proxy.cloudflare_security.listen_port='5054'
+set https-dns-proxy.cloudflare_security.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
+set https-dns-proxy.control_d_ads_tracking='https-dns-proxy'
+set https-dns-proxy.control_d_ads_tracking.resolver_url='https://freedns.controld.com/p2'
+set https-dns-proxy.control_d_ads_tracking.listen_port='5055'
+set https-dns-proxy.control_d_ads_tracking.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
+set https-dns-proxy.mullvad_base='https-dns-proxy'
+set https-dns-proxy.mullvad_base.resolver_url='https://base.dns.mullvad.net/dns-query'
+set https-dns-proxy.mullvad_base.listen_port='5056'
+set https-dns-proxy.mullvad_base.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
 
 set dhcp.dnsmasq.noresolv='1'
-set dhcp.dnsmasq.cachesize='0'
+set dhcp.dnsmasq.cachesize='4096'
 delete dhcp.dnsmasq.server
-add_list dhcp.dnsmasq.server='127.0.0.53#53'
+add_list dhcp.dnsmasq.server='127.0.0.1#5053'
+add_list dhcp.dnsmasq.server='127.0.0.1#5054'
+add_list dhcp.dnsmasq.server='127.0.0.1#5055'
+add_list dhcp.dnsmasq.server='127.0.0.1#5056'
 
 delete system.ntp.server
 add_list system.ntp.server='194.177.4.1'

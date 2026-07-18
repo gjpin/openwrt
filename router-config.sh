@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Confirmed transaction manager for the router's UCI and DNSCrypt configuration.
+# Confirmed transaction manager for the router's UCI configuration.
 # Run only on the intended router with a verified local recovery path.
 
 set -eu
@@ -15,10 +15,9 @@ LIBEXEC=${ROUTER_CONFIG_LIBEXEC:-/usr/libexec/router-config}
 NETWORK_INIT=${ROUTER_CONFIG_NETWORK_INIT:-/etc/init.d/network}
 FIREWALL_INIT=${ROUTER_CONFIG_FIREWALL_INIT:-/etc/init.d/firewall}
 SYSNTPD_INIT=${ROUTER_CONFIG_SYSNTPD_INIT:-/etc/init.d/sysntpd}
-DNSCRYPT_INIT=${ROUTER_CONFIG_DNSCRYPT_INIT:-/etc/init.d/dnscrypt-proxy}
+HTTPS_DNS_PROXY_INIT=${ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT:-/etc/init.d/https-dns-proxy}
 DNSMASQ_INIT=${ROUTER_CONFIG_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
 ADBLOCK_INIT=${ROUTER_CONFIG_ADBLOCK_INIT:-/etc/init.d/adblock-fast}
-DNSCRYPT_CONFIG=${ROUTER_CONFIG_DNSCRYPT_CONFIG:-${DNSCRYPT_CONFIG_FILE:-/etc/dnscrypt-proxy2/dnscrypt-proxy.toml}}
 TIMEOUT=${ROUTER_CONFIG_TIMEOUT:-300}
 POLL_INTERVAL=${ROUTER_CONFIG_POLL_INTERVAL:-1}
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -29,7 +28,6 @@ elif [ -n "${ROUTER_CONFIG_OVERLAY_DIR:-}" ]; then
 else
     UCI_DIR=$SCRIPT_DIR/uci
 fi
-DNSCRYPT_SOURCE=${ROUTER_CONFIG_DNSCRYPT_SOURCE:-$SCRIPT_DIR/configs/dnscrypt/dnscrypt-proxy.toml}
 if [ -n "${ROUTER_CONFIG_MODULE_DIR:-}" ]; then
     MODULE_DIR=$ROUTER_CONFIG_MODULE_DIR
 elif [ -d "$SCRIPT_DIR/modules" ]; then
@@ -38,7 +36,7 @@ else
     MODULE_DIR=${LIBEXEC}.modules
 fi
 RUNTIME_MODULE_DIR=${ROUTER_CONFIG_RUNTIME_MODULE_DIR:-${LIBEXEC}.modules}
-UCI_PACKAGES='network firewall wireless dhcp system adblock-fast'
+UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast'
 MODULES='network firewall wireless dns-over-https adblock-fast wireguard'
 
 die() {
@@ -57,7 +55,7 @@ require_root() {
 }
 
 require_commands() {
-    for command_name in uci fw4 ubus wifi sha256sum dnscrypt-proxy; do
+    for command_name in uci fw4 ubus wifi sha256sum; do
         command -v "$command_name" >/dev/null 2>&1 || die "required command not found: $command_name"
     done
 }
@@ -145,7 +143,6 @@ preflight() {
         [ -s "$CONFIG_DIR/$config_name" ] || die "missing or empty $CONFIG_DIR/$config_name"
         uci -q -c "$CONFIG_DIR" show "$config_name" >/dev/null || die "malformed UCI package: $config_name"
     done
-    [ -s "$DNSCRYPT_SOURCE" ] || die "missing or empty DNSCrypt source: $DNSCRYPT_SOURCE"
     network_module_preflight
     firewall_module_preflight
     wireless_module_preflight
@@ -171,19 +168,16 @@ apply_overlay() {
 
 validate_candidate() {
     candidate_dir=$1
-    dnscrypt_candidate=$2
     for config_name in $UCI_PACKAGES; do
         [ -s "$candidate_dir/$config_name" ] || die "empty candidate package: $config_name"
         uci -q -c "$candidate_dir" show "$config_name" >/dev/null || die "malformed candidate package: $config_name"
         # shellcheck disable=SC2016
         grep -F '${' "$candidate_dir/$config_name" >/dev/null 2>&1 && die "unresolved placeholder in $config_name candidate"
     done
-    # shellcheck disable=SC2016
-    grep -F '${' "$dnscrypt_candidate" >/dev/null 2>&1 && die 'unresolved placeholder in DNSCrypt candidate'
     network_module_validate "$candidate_dir"
     firewall_module_validate "$candidate_dir"
     wireless_module_validate "$candidate_dir"
-    dns_over_https_validate "$candidate_dir" "$dnscrypt_candidate"
+    dns_over_https_validate "$candidate_dir"
     adblock_fast_validate "$candidate_dir"
     wireguard_validate "$candidate_dir"
 }
@@ -200,12 +194,6 @@ write_manifest() {
     for package_name in $UCI_PACKAGES; do
         manifest_files="$manifest_files backup/$package_name candidate/$package_name"
     done
-    if [ -f "$transaction_dir/backup/dnscrypt-proxy.toml" ]; then
-        manifest_files="$manifest_files backup/dnscrypt-proxy.toml"
-    else
-        manifest_files="$manifest_files backup/dnscrypt-proxy.missing"
-    fi
-    manifest_files="$manifest_files candidate/dnscrypt-proxy.toml"
     # Intentional splitting of the internally constructed relative path list.
     # shellcheck disable=SC2086
     (cd "$transaction_dir" && sha256sum $manifest_files) >"$transaction_dir/manifest.sha256"
@@ -255,12 +243,6 @@ prepare() {
         cp "$CONFIG_DIR/$package_name" "$transaction_dir/backup/$package_name"
         cp "$CONFIG_DIR/$package_name" "$transaction_dir/candidate/$package_name"
     done
-    if [ -f "$DNSCRYPT_CONFIG" ]; then
-        cp "$DNSCRYPT_CONFIG" "$transaction_dir/backup/dnscrypt-proxy.toml"
-    else
-        : >"$transaction_dir/backup/dnscrypt-proxy.missing"
-    fi
-    cp "$DNSCRYPT_SOURCE" "$transaction_dir/candidate/dnscrypt-proxy.toml"
     for overlay_name in network firewall wireless dns-over-https adblock-fast; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
@@ -270,10 +252,10 @@ prepare() {
     network_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/network"
     firewall_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/firewall"
     wireless_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireless"
-    dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https" "$transaction_dir/candidate/dnscrypt-proxy.toml"
+    dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
     adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
     wireguard_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireguard"
-    validate_candidate "$transaction_dir/candidate" "$transaction_dir/candidate/dnscrypt-proxy.toml"
+    validate_candidate "$transaction_dir/candidate"
     write_manifest "$transaction_dir"
     printf '%s\n' prepared >"$transaction_dir/state"
     chmod 600 "$transaction_dir/state"
@@ -297,12 +279,6 @@ install_uci_files() {
 install_candidate() {
     candidate_dir=$1
     install_uci_files "$candidate_dir" || return 1
-    dnscrypt_parent=${DNSCRYPT_CONFIG%/*}
-    [ "$dnscrypt_parent" = "$DNSCRYPT_CONFIG" ] || mkdir -p "$dnscrypt_parent" || return 1
-    dnscrypt_temp=$DNSCRYPT_CONFIG.router-config.$$
-    cp "$candidate_dir/dnscrypt-proxy.toml" "$dnscrypt_temp" || return 1
-    chmod 600 "$dnscrypt_temp" || return 1
-    mv -f "$dnscrypt_temp" "$DNSCRYPT_CONFIG" || return 1
 }
 
 reload_services() {
@@ -310,7 +286,7 @@ reload_services() {
         wifi reload &&
         "$FIREWALL_INIT" reload &&
         "$SYSNTPD_INIT" restart &&
-        "$DNSCRYPT_INIT" restart &&
+        "$HTTPS_DNS_PROXY_INIT" restart &&
         "$DNSMASQ_INIT" restart &&
         "$ADBLOCK_INIT" restart
 }
@@ -318,14 +294,6 @@ reload_services() {
 restore_transaction() {
     transaction_dir=$1
     install_uci_files "$transaction_dir/backup" || die 'CRITICAL: UCI backup restoration failed'
-    if [ -f "$transaction_dir/backup/dnscrypt-proxy.missing" ]; then
-        rm -f "$DNSCRYPT_CONFIG"
-    else
-        dnscrypt_temp=$DNSCRYPT_CONFIG.router-config.restore.$$
-        cp "$transaction_dir/backup/dnscrypt-proxy.toml" "$dnscrypt_temp" || die 'CRITICAL: DNSCrypt backup restoration failed'
-        chmod 600 "$dnscrypt_temp" || die 'CRITICAL: DNSCrypt backup restoration failed'
-        mv -f "$dnscrypt_temp" "$DNSCRYPT_CONFIG" || die 'CRITICAL: DNSCrypt backup restoration failed'
-    fi
     if [ "${2-}" != boot ]; then
         reload_services || die 'CRITICAL: backups restored but a service reload failed'
     fi

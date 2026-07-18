@@ -18,7 +18,7 @@ output_path=$output_directory/$(basename -- "$1")
 staging_directory=$(mktemp -d)
 trap 'rm -rf "$staging_directory"' EXIT HUP INT TERM
 
-mkdir -p "$staging_directory/uci" "$staging_directory/configs/dnscrypt" "$staging_directory/modules"
+mkdir -p "$staging_directory/uci" "$staging_directory/modules"
 cp "$repository_dir/router-config.sh" "$repository_dir/router-config-rollback.init" "$staging_directory/"
 cp "$repository_dir/uci/network" \
     "$repository_dir/uci/firewall" \
@@ -27,7 +27,6 @@ cp "$repository_dir/uci/network" \
     "$repository_dir/uci/adblock-fast" \
     "$repository_dir/uci/wireguard" \
     "$staging_directory/uci/"
-cp "$repository_dir/configs/dnscrypt/dnscrypt-proxy.toml" "$staging_directory/configs/dnscrypt/"
 cp "$repository_dir/modules/base-packages.sh" \
     "$repository_dir/modules/network.sh" \
     "$repository_dir/modules/firewall.sh" \
@@ -40,6 +39,6 @@ cp "$repository_dir/modules/base-packages.sh" \
 (
     cd "$staging_directory"
     tar -czf "$output_path" \
-        router-config.sh router-config-rollback.init uci configs/dnscrypt modules
+        router-config.sh router-config-rollback.init uci modules
 )
 sha256sum "$output_path"

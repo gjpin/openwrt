@@ -10,7 +10,7 @@ confirmed within five minutes.
 - Four WPA3 networks: Pixel, Guest, IoT, and Things
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
-- DNSCrypt upstream DNS with DNS bypass controls
+- HTTPS DNS proxy upstreams with DNS bypass controls
 - DNS-based ad and tracker blocking
 - A WireGuard server attached to the trusted Pixel zone
 - Checksummed backups, candidate validation, and timed/early-boot rollback
