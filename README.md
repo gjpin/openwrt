@@ -20,7 +20,8 @@ confirmed within five minutes.
 
 This configuration supports fresh OpenWrt 25.12 or newer installations using
 official `apk` feeds and at least 256 MB RAM. It is specific to hardware with
-`radio0`, `br-lan`, and DSA ports `lan1` through `lan4`. The existing router must
+one `2g` and one `5g` wifi-device, `br-lan`, and DSA ports `lan1` through `lan4`.
+The existing router must
 also have its standard loopback, globals, IPv4 WAN, firewall defaults, WAN zone,
 and a single dnsmasq section. It must not define a `wan6` interface or ULA prefix.
 

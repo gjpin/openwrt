@@ -17,7 +17,29 @@ wireless_module_validate_passwords() {
 
 wireless_module_preflight() {
     wireless_module_validate_passwords
-    require_type wireless.radio0 wifi-device
+    WIRELESS_2G_DEVICE=
+    WIRELESS_5G_DEVICE=
+    wifi_devices=$(uci -q -c "$CONFIG_DIR" show wireless |
+        sed -n \
+            -e "s/^wireless\.\([^.]*\)='wifi-device'$/\1/p" \
+            -e "s/^wireless\.\([^.]*\)=wifi-device$/\1/p")
+    # Intentional splitting: UCI section names cannot contain whitespace.
+    # shellcheck disable=SC2086
+    for section_name in $wifi_devices; do
+        band=$(uci -q -c "$CONFIG_DIR" get "wireless.$section_name.band" 2>/dev/null || :)
+        case $band in
+            2g)
+                [ -z "$WIRELESS_2G_DEVICE" ] || die 'multiple 2.4 GHz wifi-device sections found'
+                WIRELESS_2G_DEVICE=$section_name
+                ;;
+            5g)
+                [ -z "$WIRELESS_5G_DEVICE" ] || die 'multiple 5 GHz wifi-device sections found'
+                WIRELESS_5G_DEVICE=$section_name
+                ;;
+        esac
+    done
+    [ -n "$WIRELESS_2G_DEVICE" ] || die "missing wifi-device with band '2g'"
+    [ -n "$WIRELESS_5G_DEVICE" ] || die "missing wifi-device with band '5g'"
     if uci -q -c "$CONFIG_DIR" show wireless | grep -E "wireless\.@wifi-iface\[[0-9]+\].*(pixel|pixelthings|pixelguest|pixeliot|Pixel|PixelThings|PixelGuest|PixelIoT)" >/dev/null; then
         die 'anonymous project wireless section found; migrate it to a named section first'
     fi
@@ -31,6 +53,10 @@ wireless_module_stage() {
     uci -q -c "$candidate_dir" set "wireless.pixelthings.key=$THINGS_WIFI_PASSWORD"
     uci -q -c "$candidate_dir" set "wireless.pixelguest.key=$GUEST_WIFI_PASSWORD"
     uci -q -c "$candidate_dir" set "wireless.pixeliot.key=$IOT_WIFI_PASSWORD"
+    uci -q -c "$candidate_dir" set "wireless.pixel.device=$WIRELESS_5G_DEVICE"
+    uci -q -c "$candidate_dir" set "wireless.pixelthings.device=$WIRELESS_5G_DEVICE"
+    uci -q -c "$candidate_dir" set "wireless.pixelguest.device=$WIRELESS_5G_DEVICE"
+    uci -q -c "$candidate_dir" set "wireless.pixeliot.device=$WIRELESS_2G_DEVICE"
     uci -q -c "$candidate_dir" commit wireless || die 'failed to serialize wireless candidate'
 }
 
@@ -41,4 +67,10 @@ wireless_module_validate() {
         key_value=$(uci_get "$candidate_dir" "wireless.$section_name.key") || die "missing Wi-Fi key for $section_name"
         [ -n "$key_value" ] || die "empty Wi-Fi key for $section_name"
     done
+    for section_name in pixel pixelthings pixelguest; do
+        [ "$(uci_get "$candidate_dir" "wireless.$section_name.device")" = "$WIRELESS_5G_DEVICE" ] ||
+            die "wireless.$section_name is not assigned to the 5 GHz radio"
+    done
+    [ "$(uci_get "$candidate_dir" wireless.pixeliot.device)" = "$WIRELESS_2G_DEVICE" ] ||
+        die 'wireless.pixeliot is not assigned to the 2.4 GHz radio'
 }

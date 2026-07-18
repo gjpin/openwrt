@@ -181,7 +181,10 @@ def router():
         "wan": {".type": "zone", "name": "wan", "network": ["wan"]},
         "unrelated": {".type": "rule", "name": "Keep me"},
     }
-    wireless = {"radio0": {".type": "wifi-device", "type": "mac80211", "channel": "auto"}}
+    wireless = {
+        "radio0": {".type": "wifi-device", "type": "mac80211", "band": "5g", "channel": "auto"},
+        "radio1": {".type": "wifi-device", "type": "mac80211", "band": "2g", "channel": "auto"},
+    }
     dhcp = {
         "dnsmasq": {".type": "dnsmasq", "server": ["old"], "domainneeded": "1"},
         "unrelated": {".type": "dhcp", "interface": "unrelated", "ignore": "1"},
@@ -290,6 +293,11 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
             "start": "100", "limit": "150", "leasetime": "12h",
             "ra": "disabled", "dhcpv6": "disabled", "ndp": "disabled",
         }
+    wireless = json.loads((transaction_dir / "candidate" / "wireless").read_text())
+    assert wireless["pixel"]["device"] == "radio0"
+    assert wireless["pixelthings"]["device"] == "radio0"
+    assert wireless["pixelguest"]["device"] == "radio0"
+    assert wireless["pixeliot"]["device"] == "radio1"
     assert dhcp["unrelated"]["ignore"] == "1"
     assert dhcp["dnsmasq"]["server"] == [
         "127.0.0.1#5053", "127.0.0.1#5054", "127.0.0.1#5055", "127.0.0.1#5056",
@@ -362,6 +370,31 @@ def test_preflight_rejects_missing_hardware_without_backup(router):
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert result.returncode != 0
     assert "required DSA interface missing: lan4" in result.stderr
+    assert not backups.exists()
+
+
+def test_wireless_assignment_follows_bands_not_radio_numbers(router):
+    _, config, backups, _, env = router
+    wireless = json.loads((config / "wireless").read_text())
+    wireless["radio0"]["band"] = "2g"
+    wireless["radio1"]["band"] = "5g"
+    (config / "wireless").write_text(json.dumps(wireless))
+    _, transaction = prepare(env)
+    candidate = json.loads((backups / transaction / "candidate" / "wireless").read_text())
+    assert candidate["pixel"]["device"] == "radio1"
+    assert candidate["pixelthings"]["device"] == "radio1"
+    assert candidate["pixelguest"]["device"] == "radio1"
+    assert candidate["pixeliot"]["device"] == "radio0"
+
+
+def test_preflight_requires_explicit_2g_and_5g_radios(router):
+    _, config, backups, _, env = router
+    wireless = json.loads((config / "wireless").read_text())
+    del wireless["radio1"]["band"]
+    (config / "wireless").write_text(json.dumps(wireless))
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert "missing wifi-device with band '2g'" in result.stderr
     assert not backups.exists()
 
 
