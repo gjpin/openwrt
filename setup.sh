@@ -62,7 +62,7 @@ validate_repository() {
 validate_inputs() {
     for variable_name in \
         PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
-        VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_ADDR6 VPN_PUB VPN_PSK; do
+        VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK; do
         require_variable "$variable_name"
     done
     for variable_name in PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD; do
@@ -88,13 +88,6 @@ validate_inputs() {
     case $VPN_ADDR in
         *[!0-9./]*) die 'VPN_ADDR must contain only an IPv4 address and prefix length' ;;
     esac
-    case $VPN_ADDR6 in
-        *:/* | *:*/*) : ;;
-        *) die 'VPN_ADDR6 must be an IPv6 CIDR address' ;;
-    esac
-    case $VPN_ADDR6 in
-        *[!0-9A-Fa-f:./]*) die 'VPN_ADDR6 must contain only an IPv6 address and prefix length' ;;
-    esac
     validate_wireguard_key VPN_KEY
     validate_wireguard_key VPN_PUB
     validate_wireguard_key VPN_PSK
@@ -105,7 +98,7 @@ validate_inputs() {
 validate_inputs
 validate_repository
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
-export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_ADDR6 VPN_PUB VPN_PSK
+export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK
 
 # Modules are internal sourced files. Their fixed order is part of the setup
 # contract and is deliberately not user-selectable.

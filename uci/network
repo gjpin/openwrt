@@ -1,6 +1,8 @@
 # Feature overlay: managed VLANs and their DHCP pools.
 # This is applied to an existing OpenWrt configuration, not installed directly.
 
+set network.wan.ipv6='0'
+
 del_list network.br_lan.ports='lan1'
 del_list network.br_lan.ports='lan2'
 del_list network.br_lan.ports='lan3'
@@ -43,7 +45,7 @@ set network.pixel.device='br-lan.1'
 set network.pixel.proto='static'
 set network.pixel.ipaddr='192.168.1.1'
 set network.pixel.netmask='255.255.255.0'
-set network.pixel.ip6assign='60'
+set network.pixel.delegate='0'
 
 delete network.pixelthings
 set network.pixelthings='interface'
@@ -51,6 +53,7 @@ set network.pixelthings.device='br-lan.4'
 set network.pixelthings.proto='static'
 set network.pixelthings.ipaddr='192.168.4.1'
 set network.pixelthings.netmask='255.255.255.0'
+set network.pixelthings.delegate='0'
 
 delete network.pixelguest
 set network.pixelguest='interface'
@@ -58,6 +61,7 @@ set network.pixelguest.device='br-lan.2'
 set network.pixelguest.proto='static'
 set network.pixelguest.ipaddr='192.168.2.1'
 set network.pixelguest.netmask='255.255.255.0'
+set network.pixelguest.delegate='0'
 
 delete network.pixeliot
 set network.pixeliot='interface'
@@ -65,6 +69,7 @@ set network.pixeliot.device='br-lan.3'
 set network.pixeliot.proto='static'
 set network.pixeliot.ipaddr='192.168.3.1'
 set network.pixeliot.netmask='255.255.255.0'
+set network.pixeliot.delegate='0'
 
 delete dhcp.pixel
 set dhcp.pixel='dhcp'
@@ -73,6 +78,9 @@ set dhcp.pixel.ignore='0'
 set dhcp.pixel.start='100'
 set dhcp.pixel.limit='150'
 set dhcp.pixel.leasetime='12h'
+set dhcp.pixel.ra='disabled'
+set dhcp.pixel.dhcpv6='disabled'
+set dhcp.pixel.ndp='disabled'
 
 delete dhcp.pixelthings
 set dhcp.pixelthings='dhcp'
@@ -81,6 +89,9 @@ set dhcp.pixelthings.ignore='0'
 set dhcp.pixelthings.start='100'
 set dhcp.pixelthings.limit='150'
 set dhcp.pixelthings.leasetime='12h'
+set dhcp.pixelthings.ra='disabled'
+set dhcp.pixelthings.dhcpv6='disabled'
+set dhcp.pixelthings.ndp='disabled'
 
 delete dhcp.pixelguest
 set dhcp.pixelguest='dhcp'
@@ -89,6 +100,9 @@ set dhcp.pixelguest.ignore='0'
 set dhcp.pixelguest.start='100'
 set dhcp.pixelguest.limit='150'
 set dhcp.pixelguest.leasetime='12h'
+set dhcp.pixelguest.ra='disabled'
+set dhcp.pixelguest.dhcpv6='disabled'
+set dhcp.pixelguest.ndp='disabled'
 
 delete dhcp.pixeliot
 set dhcp.pixeliot='dhcp'
@@ -97,3 +111,6 @@ set dhcp.pixeliot.ignore='0'
 set dhcp.pixeliot.start='100'
 set dhcp.pixeliot.limit='150'
 set dhcp.pixeliot.leasetime='12h'
+set dhcp.pixeliot.ra='disabled'
+set dhcp.pixeliot.dhcpv6='disabled'
+set dhcp.pixeliot.ndp='disabled'

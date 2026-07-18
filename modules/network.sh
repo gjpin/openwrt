@@ -6,7 +6,6 @@ network_module_preflight() {
     require_type network.loopback interface
     require_type network.globals globals
     require_type network.wan interface
-    require_type network.wan6 interface
     require_type network.br_lan device
     [ "$(uci_get "$CONFIG_DIR" network.br_lan.name)" = br-lan ] || die 'network.br_lan is not br-lan'
 
@@ -43,11 +42,14 @@ network_module_stage() {
 
 network_module_validate() {
     candidate_dir=$1
-    for required_section in loopback globals wan wan6 br_lan; do
+    for required_section in loopback globals wan br_lan; do
         before=$(uci_get "$CONFIG_DIR" "network.$required_section") || die "base section disappeared: network.$required_section"
         after=$(uci_get "$candidate_dir" "network.$required_section") || die "candidate lacks network.$required_section"
         [ "$before" = "$after" ] || die "candidate changed base section type: network.$required_section"
     done
+    ! uci_get "$candidate_dir" network.wan6 >/dev/null 2>&1 || die 'IPv6 WAN interface is still configured'
+    ! uci_get "$candidate_dir" network.globals.ula_prefix >/dev/null 2>&1 || die 'IPv6 ULA prefix is still configured'
+    [ "$(uci_get "$candidate_dir" network.wan.ipv6)" = 0 ] || die 'IPv6 is not disabled on WAN'
     for section_name in pixel pixelthings pixelguest pixeliot; do
         [ "$(uci_get "$candidate_dir" "network.$section_name")" = interface ] || die "missing network.$section_name"
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name")" = dhcp ] || die "missing dhcp.$section_name"
@@ -55,5 +57,9 @@ network_module_validate() {
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name.start")" = 100 ] || die "unexpected DHCP start for $section_name"
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name.limit")" = 150 ] || die "unexpected DHCP limit for $section_name"
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name.leasetime")" = 12h ] || die "unexpected DHCP lease time for $section_name"
+        [ "$(uci_get "$candidate_dir" "network.$section_name.delegate")" = 0 ] || die "IPv6 delegation is not disabled for $section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name.ra")" = disabled ] || die "IPv6 router advertisements are not disabled for $section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name.dhcpv6")" = disabled ] || die "DHCPv6 is not disabled for $section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name.ndp")" = disabled ] || die "NDP proxying is not disabled for $section_name"
     done
 }

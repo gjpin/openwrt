@@ -12,7 +12,7 @@ then makes these coordinated configuration changes:
   Base instances use the same IPv4 bootstrap list.
 - `https-dns-proxy` is prevented from changing dnsmasq or firewall state on
   service start and stop; those settings remain transaction-managed.
-- WAN and WAN6 stop accepting peer-provided DNS servers.
+- WAN stops accepting peer-provided DNS servers.
 - The system NTP server list is replaced with fixed IP addresses so time can be
   established without depending on DNS.
 - Firewall rules DNAT WAN port 53 to LAN port 53, DNAT LAN port 5353 to port 53,

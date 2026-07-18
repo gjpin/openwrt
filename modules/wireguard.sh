@@ -10,14 +10,11 @@ wireguard_render_overlay() {
     source_file=$1
     rendered_file=$2
     vpn_client_addr=${VPN_ADDR%.*}.2/32
-    vpn_client_addr6=${VPN_ADDR6%:*}:2/128
     sed \
         -e "s|\${VPN_IF}|$VPN_IF|g" \
         -e "s|\${VPN_PORT}|$VPN_PORT|g" \
-        -e "s|\${VPN_ADDR6}|$VPN_ADDR6|g" \
         -e "s|\${VPN_ADDR}|$VPN_ADDR|g" \
         -e "s|\${VPN_PUB}|$VPN_PUB|g" \
-        -e "s|\${VPN_CLIENT_ADDR6}|$vpn_client_addr6|g" \
         -e "s|\${VPN_CLIENT_ADDR}|$vpn_client_addr|g" \
         "$source_file" >"$rendered_file" || die 'failed to render WireGuard overlay'
     chmod 600 "$rendered_file"

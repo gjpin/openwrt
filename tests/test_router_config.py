@@ -171,15 +171,14 @@ def router():
 
     network = {
         "loopback": {".type": "interface", "proto": "static"},
-        "globals": {".type": "globals", "ula_prefix": "fd00::/48"},
+        "globals": {".type": "globals"},
         "wan": {".type": "interface", "proto": "dhcp"},
-        "wan6": {".type": "interface", "proto": "dhcpv6"},
         "br_lan": {".type": "device", "name": "br-lan", "ports": ["lan1", "lan2", "lan3", "lan4"], "stp": "1"},
         "unrelated": {".type": "interface", "proto": "none"},
     }
     firewall = {
         "defaults": {".type": "defaults", "input": "REJECT"},
-        "wan": {".type": "zone", "name": "wan", "network": ["wan", "wan6"]},
+        "wan": {".type": "zone", "name": "wan", "network": ["wan"]},
         "unrelated": {".type": "rule", "name": "Keep me"},
     }
     wireless = {"radio0": {".type": "wifi-device", "type": "mac80211", "channel": "auto"}}
@@ -252,7 +251,6 @@ exit 0
         "VPN_PORT": "51820",
         "VPN_KEY": "private-secret",
         "VPN_ADDR": "10.10.0.1/24",
-        "VPN_ADDR6": "fd10::1/64",
         "VPN_PUB": "public-key",
         "VPN_PSK": "preshared-secret",
     }
@@ -290,6 +288,7 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         assert dhcp[name] == {
             ".type": "dhcp", "interface": name, "ignore": "0",
             "start": "100", "limit": "150", "leasetime": "12h",
+            "ra": "disabled", "dhcpv6": "disabled", "ndp": "disabled",
         }
     assert dhcp["unrelated"]["ignore"] == "1"
     assert dhcp["dnsmasq"]["server"] == [
@@ -336,6 +335,13 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert env["VPN_KEY"] not in rendered
     assert env["VPN_PSK"] not in rendered
     assert "${" not in rendered
+    assert candidate["wan"]["ipv6"] == "0"
+    assert "wan6" not in candidate
+    assert "ula_prefix" not in candidate["globals"]
+    assert candidate["wgserver"]["addresses"] == ["10.10.0.1/24"]
+    assert candidate["wgclient"]["allowed_ips"] == ["10.10.0.2/32"]
+    firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
+    assert firewall["wan"]["network"] == ["wan"]
 
 
 def test_repeated_prepare_is_idempotent(router):
@@ -551,7 +557,6 @@ def test_setup_validates_all_inputs_before_mutation(router):
         "VPN_PORT": "51820",
         "VPN_KEY": key,
         "VPN_ADDR": "10.10.0.1/24",
-        "VPN_ADDR6": "fd10::1/64",
         "VPN_PUB": key,
         "VPN_PSK": key,
     })

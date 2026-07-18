@@ -37,7 +37,6 @@ add_list system.ntp.server='80.50.102.114'
 add_list system.ntp.server='193.219.28.60'
 
 set network.wan.peerdns='0'
-set network.wan6.peerdns='0'
 
 delete firewall.divert_dns_53
 set firewall.divert_dns_53='redirect'

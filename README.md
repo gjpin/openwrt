@@ -12,7 +12,8 @@ confirmed within five minutes.
 - Allowlisted inter-VLAN and internet access
 - HTTPS DNS proxy upstreams with DNS bypass controls
 - DNS-based ad and tracker blocking
-- A WireGuard server attached to the trusted Pixel zone
+- An IPv4-only WireGuard server attached to the trusted Pixel zone
+- IPv4-only WAN and managed VLANs, with IPv6 delegation and advertisements disabled
 - Checksummed backups, candidate validation, and timed/early-boot rollback
 
 ## Compatibility and safety
@@ -20,8 +21,8 @@ confirmed within five minutes.
 This configuration supports fresh OpenWrt 25.12 or newer installations using
 official `apk` feeds and at least 256 MB RAM. It is specific to hardware with
 `radio0`, `br-lan`, and DSA ports `lan1` through `lan4`. The existing router must
-also have its standard loopback, globals, WAN/WAN6, firewall defaults, WAN zone,
-and a single dnsmasq section.
+also have its standard loopback, globals, IPv4 WAN, firewall defaults, WAN zone,
+and a single dnsmasq section. It must not define a `wan6` interface or ULA prefix.
 
 Do not run this on a router with a different port or radio layout. Applying the
 network, firewall, and wireless changes can disconnect every remote session.
@@ -77,7 +78,6 @@ not run it on a workstation.
    export VPN_PORT='51820'
    export VPN_KEY='replace-with-server-private-key'
    export VPN_ADDR='10.10.0.1/24'
-   export VPN_ADDR6='fd10::1/64'
    export VPN_PUB='replace-with-client-public-key'
    export VPN_PSK='replace-with-preshared-key'
    ./setup.sh --recovery-ready

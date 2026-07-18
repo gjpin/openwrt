@@ -6,12 +6,10 @@ set network.${VPN_IF}='interface'
 set network.${VPN_IF}.proto='wireguard'
 set network.${VPN_IF}.listen_port='${VPN_PORT}'
 add_list network.${VPN_IF}.addresses='${VPN_ADDR}'
-add_list network.${VPN_IF}.addresses='${VPN_ADDR6}'
 delete network.wgclient
 set network.wgclient='wireguard_${VPN_IF}'
 set network.wgclient.public_key='${VPN_PUB}'
 add_list network.wgclient.allowed_ips='${VPN_CLIENT_ADDR}'
-add_list network.wgclient.allowed_ips='${VPN_CLIENT_ADDR6}'
 
 del_list firewall.pixel.network='${VPN_IF}'
 add_list firewall.pixel.network='${VPN_IF}'

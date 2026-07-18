@@ -5,11 +5,10 @@ Sources: [`modules/wireguard.sh`](../modules/wireguard.sh) and
 
 This module installs WireGuard tools and LuCI protocol support, then creates:
 
-- A server interface named by `VPN_IF`, listening on UDP `VPN_PORT` with the
-  IPv4 and IPv6 addresses in `VPN_ADDR` and `VPN_ADDR6`.
+- An IPv4-only server interface named by `VPN_IF`, listening on UDP `VPN_PORT`
+  with the address in `VPN_ADDR`.
 - One peer named `wgclient`, using `VPN_PUB` and `VPN_PSK`.
-- Peer routes for client address `.2/32` in the configured IPv4 subnet and
-  `:2/128` in the configured IPv6 prefix.
+- A peer route for client address `.2/32` in the configured IPv4 subnet.
 - A WAN firewall rule allowing the configured UDP port.
 - Membership of the server interface in the trusted `pixel` firewall zone.
 

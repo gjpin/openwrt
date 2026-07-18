@@ -21,6 +21,8 @@ firewall_module_validate() {
     candidate_dir=$1
     [ "$(uci_get "$candidate_dir" 'firewall.@defaults[0]')" = defaults ] || die 'candidate lacks firewall defaults'
     uci -q -c "$candidate_dir" show firewall | grep -Eq "\.name='?wan'?\$" || die 'candidate lacks firewall WAN zone'
+    ! uci -q -c "$candidate_dir" show firewall | grep -Eq "\.network='?wan6'?\$" ||
+        die 'firewall still references an IPv6 WAN interface'
     for section_name in pixel pixelthings pixelguest pixeliot; do
         [ "$(uci_get "$candidate_dir" "firewall.$section_name")" = zone ] || die "missing firewall.$section_name"
     done
