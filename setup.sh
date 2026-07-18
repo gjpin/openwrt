@@ -51,11 +51,11 @@ validate_wireguard_key() {
 
 validate_inputs() {
     for variable_name in \
-        MAIN_WIFI_PASSWORD SECONDARY_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
+        PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
         VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_ADDR6 VPN_PUB VPN_PSK; do
         require_variable "$variable_name"
     done
-    for variable_name in MAIN_WIFI_PASSWORD SECONDARY_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD; do
+    for variable_name in PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD; do
         validate_wifi_password "$variable_name"
     done
     case $VPN_IF in
@@ -101,7 +101,7 @@ validate_inputs() {
 # Validate the entire public environment contract before the first router
 # mutation. Error messages intentionally name variables but never print values.
 validate_inputs
-export MAIN_WIFI_PASSWORD SECONDARY_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
+export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
 export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_ADDR6 VPN_PUB VPN_PSK
 
 bundle_archive=$(mktemp /tmp/router-config-bundle.XXXXXX.tar.gz)

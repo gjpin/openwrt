@@ -32,13 +32,13 @@ or wireless file can disconnect the router and require local recovery.
 ## Configuration invariants
 
 - Keep network names aligned across the UCI feature overlays. Current VLAN interfaces
-  are `pixelmain`, `pixelsecondary`, `pixelguest`, and `pixeliot`.
+  are `pixel`, `pixelthings`, `pixelguest`, and `pixeliot`.
 - Keep VLAN IDs, bridge devices, subnets, wireless `network` values, firewall
   zones, and forwarding endpoints consistent as one change.
 - Every VLAN must have an explicit DHCP decision. The managed pools are declared
   in `uci/network`; preserve their named sections and documented ranges.
 - Preserve the isolation policy documented in `uci/firewall`:
-  PixelMain can reach WAN and the other VLANs; Guest and Secondary can reach WAN
+  Pixel can reach WAN and the other VLANs; Guest and Things can reach WAN
   but not other VLANs; IoT has no WAN forwarding. All restricted VLANs need only
   the explicitly allowed router services such as DNS and DHCP.
 - Account for the target device's existing base configuration. The checked-in

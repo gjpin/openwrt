@@ -242,8 +242,8 @@ exit 0
         "ROUTER_CONFIG_DNSCRYPT_SOURCE": str(REPO / "configs/dnscrypt/dnscrypt-proxy.toml"),
         "ROUTER_CONFIG_TIMEOUT": "2",
         "ROUTER_CONFIG_POLL_INTERVAL": "0.05",
-        "MAIN_WIFI_PASSWORD": "main-secret-123",
-        "SECONDARY_WIFI_PASSWORD": "secondary-secret-123",
+        "PIXEL_WIFI_PASSWORD": "pixel-secret-123",
+        "THINGS_WIFI_PASSWORD": "things-secret-123",
         "GUEST_WIFI_PASSWORD": "guest-secret-123",
         "IOT_WIFI_PASSWORD": "iot-secret-123",
         "VPN_IF": "wgserver",
@@ -279,12 +279,12 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     candidate = json.loads((backups / transaction / "candidate" / "network").read_text())
     assert candidate["br_lan"]["stp"] == "1"
     assert candidate["unrelated"] == {".type": "interface", "proto": "none"}
-    assert set(name for name in candidate if name == "pixelmain") == {"pixelmain"}
-    assert "main-secret-123" not in result.stdout + result.stderr
+    assert set(name for name in candidate if name == "pixel") == {"pixel"}
+    assert "pixel-secret-123" not in result.stdout + result.stderr
     assert (backups / transaction).stat().st_mode & 0o777 == 0o700
     transaction_dir = backups / transaction
     dhcp = json.loads((transaction_dir / "candidate" / "dhcp").read_text())
-    for name in ("pixelmain", "pixelsecondary", "pixelguest", "pixeliot"):
+    for name in ("pixel", "pixelthings", "pixelguest", "pixeliot"):
         assert dhcp[name] == {
             ".type": "dhcp", "interface": name, "ignore": "0",
             "start": "100", "limit": "150", "leasetime": "12h",
@@ -339,7 +339,7 @@ def test_preflight_rejects_missing_hardware_without_backup(router):
 def test_placeholder_and_lock_are_rejected(router):
     root, _, _, overlays, env = router
     with (overlays / "network").open("a") as stream:
-        stream.write("\nset network.pixelmain.bad='${UNRESOLVED}'\n")
+        stream.write("\nset network.pixel.bad='${UNRESOLVED}'\n")
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert "unresolved placeholder" in result.stderr
     (overlays / "network").write_text((REPO / "uci/network").read_text())
@@ -379,7 +379,7 @@ def test_apply_confirm_and_manual_rollback(router):
     stdout, stderr = process.communicate(timeout=5)
     assert process.returncode == 0, stderr
     assert "confirm" in stdout
-    assert json.loads((config / "network").read_text())["pixelmain"]["ipaddr"] == "192.168.1.1"
+    assert json.loads((config / "network").read_text())["pixel"]["ipaddr"] == "192.168.1.1"
     assert Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"]).exists()
     run_router(env, "rollback", transaction)
     assert {name: (config / name).read_text() for name in originals} == originals
@@ -611,7 +611,7 @@ def test_setup_validates_all_inputs_before_mutation(router):
     assert result.returncode != 0
     assert "safe UCI section name" in result.stderr
     assert not marker.exists()
-    for secret in (key, env["MAIN_WIFI_PASSWORD"], env["VPN_KEY"]):
+    for secret in (key, env["PIXEL_WIFI_PASSWORD"], env["VPN_KEY"]):
         assert secret not in result.stdout + result.stderr
 
 

@@ -7,12 +7,12 @@ confirmed within five minutes.
 
 ## Features
 
-- Four WPA3 networks: Main, Guest, IoT, and Secondary
+- Four WPA3 networks: Pixel, Guest, IoT, and Things
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
 - DNSCrypt upstream DNS with DNS bypass controls
 - DNS-based ad and tracker blocking
-- A WireGuard server attached to the trusted Main zone
+- A WireGuard server attached to the trusted Pixel zone
 - Checksummed backups, candidate validation, and timed/early-boot rollback
 
 ## Compatibility and safety
@@ -75,8 +75,8 @@ placeholders will deliberately refuse to run.
    command-line arguments:
 
    ```sh
-   export MAIN_WIFI_PASSWORD='replace-me'
-   export SECONDARY_WIFI_PASSWORD='replace-me'
+   export PIXEL_WIFI_PASSWORD='replace-me'
+   export THINGS_WIFI_PASSWORD='replace-me'
    export GUEST_WIFI_PASSWORD='replace-me'
    export IOT_WIFI_PASSWORD='replace-me'
    export VPN_IF='wgserver'

@@ -27,7 +27,7 @@ network_module_preflight() {
         esac
     done
 
-    if uci -q -c "$CONFIG_DIR" show network | grep -E "network\.@(interface|bridge-vlan)\[[0-9]+\].*(pixelmain|pixelsecondary|pixelguest|pixeliot|br-lan\.[1-4])" >/dev/null; then
+    if uci -q -c "$CONFIG_DIR" show network | grep -E "network\.@(interface|bridge-vlan)\[[0-9]+\].*(pixel|pixelthings|pixelguest|pixeliot|br-lan\.[1-4])" >/dev/null; then
         die 'anonymous project network section found; migrate it to a named section first'
     fi
 
@@ -48,7 +48,7 @@ network_module_validate() {
         after=$(uci_get "$candidate_dir" "network.$required_section") || die "candidate lacks network.$required_section"
         [ "$before" = "$after" ] || die "candidate changed base section type: network.$required_section"
     done
-    for section_name in pixelmain pixelsecondary pixelguest pixeliot; do
+    for section_name in pixel pixelthings pixelguest pixeliot; do
         [ "$(uci_get "$candidate_dir" "network.$section_name")" = interface ] || die "missing network.$section_name"
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name")" = dhcp ] || die "missing dhcp.$section_name"
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name.ignore")" = 0 ] || die "DHCP is not enabled for $section_name"

@@ -1,12 +1,12 @@
 # Feature overlay: managed VLAN isolation policy.
 
-delete firewall.pixelmain
-set firewall.pixelmain='zone'
-set firewall.pixelmain.name='pixelmain'
-add_list firewall.pixelmain.network='pixelmain'
-set firewall.pixelmain.input='ACCEPT'
-set firewall.pixelmain.output='ACCEPT'
-set firewall.pixelmain.forward='REJECT'
+delete firewall.pixel
+set firewall.pixel='zone'
+set firewall.pixel.name='pixel'
+add_list firewall.pixel.network='pixel'
+set firewall.pixel.input='ACCEPT'
+set firewall.pixel.output='ACCEPT'
+set firewall.pixel.forward='REJECT'
 
 delete firewall.pixelguest
 set firewall.pixelguest='zone'
@@ -24,46 +24,46 @@ set firewall.pixeliot.input='REJECT'
 set firewall.pixeliot.output='REJECT'
 set firewall.pixeliot.forward='REJECT'
 
-delete firewall.pixelsecondary
-set firewall.pixelsecondary='zone'
-set firewall.pixelsecondary.name='pixelsecondary'
-add_list firewall.pixelsecondary.network='pixelsecondary'
-set firewall.pixelsecondary.input='REJECT'
-set firewall.pixelsecondary.output='ACCEPT'
-set firewall.pixelsecondary.forward='REJECT'
+delete firewall.pixelthings
+set firewall.pixelthings='zone'
+set firewall.pixelthings.name='pixelthings'
+add_list firewall.pixelthings.network='pixelthings'
+set firewall.pixelthings.input='REJECT'
+set firewall.pixelthings.output='ACCEPT'
+set firewall.pixelthings.forward='REJECT'
 
-delete firewall.pixelmain_wan
-set firewall.pixelmain_wan='forwarding'
-set firewall.pixelmain_wan.src='pixelmain'
-set firewall.pixelmain_wan.dest='wan'
+delete firewall.pixel_wan
+set firewall.pixel_wan='forwarding'
+set firewall.pixel_wan.src='pixel'
+set firewall.pixel_wan.dest='wan'
 delete firewall.pixelguest_wan
 set firewall.pixelguest_wan='forwarding'
 set firewall.pixelguest_wan.src='pixelguest'
 set firewall.pixelguest_wan.dest='wan'
-delete firewall.pixelsecondary_wan
-set firewall.pixelsecondary_wan='forwarding'
-set firewall.pixelsecondary_wan.src='pixelsecondary'
-set firewall.pixelsecondary_wan.dest='wan'
-delete firewall.pixelmain_secondary
-set firewall.pixelmain_secondary='forwarding'
-set firewall.pixelmain_secondary.src='pixelmain'
-set firewall.pixelmain_secondary.dest='pixelsecondary'
-delete firewall.pixelmain_guest
-set firewall.pixelmain_guest='forwarding'
-set firewall.pixelmain_guest.src='pixelmain'
-set firewall.pixelmain_guest.dest='pixelguest'
-delete firewall.pixelmain_iot
-set firewall.pixelmain_iot='forwarding'
-set firewall.pixelmain_iot.src='pixelmain'
-set firewall.pixelmain_iot.dest='pixeliot'
+delete firewall.pixelthings_wan
+set firewall.pixelthings_wan='forwarding'
+set firewall.pixelthings_wan.src='pixelthings'
+set firewall.pixelthings_wan.dest='wan'
+delete firewall.pixel_things
+set firewall.pixel_things='forwarding'
+set firewall.pixel_things.src='pixel'
+set firewall.pixel_things.dest='pixelthings'
+delete firewall.pixel_guest
+set firewall.pixel_guest='forwarding'
+set firewall.pixel_guest.src='pixel'
+set firewall.pixel_guest.dest='pixelguest'
+delete firewall.pixel_iot
+set firewall.pixel_iot='forwarding'
+set firewall.pixel_iot.src='pixel'
+set firewall.pixel_iot.dest='pixeliot'
 
-delete firewall.pixelsecondary_services
-set firewall.pixelsecondary_services='rule'
-set firewall.pixelsecondary_services.name='PixelSecondary-DNS-DHCP'
-set firewall.pixelsecondary_services.src='pixelsecondary'
-set firewall.pixelsecondary_services.dest_port='53 67 68'
-set firewall.pixelsecondary_services.proto='tcp udp'
-set firewall.pixelsecondary_services.target='ACCEPT'
+delete firewall.pixelthings_services
+set firewall.pixelthings_services='rule'
+set firewall.pixelthings_services.name='PixelThings-DNS-DHCP'
+set firewall.pixelthings_services.src='pixelthings'
+set firewall.pixelthings_services.dest_port='53 67 68'
+set firewall.pixelthings_services.proto='tcp udp'
+set firewall.pixelthings_services.target='ACCEPT'
 delete firewall.pixelguest_services
 set firewall.pixelguest_services='rule'
 set firewall.pixelguest_services.name='PixelGuest-DNS-DHCP'

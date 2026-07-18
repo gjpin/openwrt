@@ -6,8 +6,8 @@ delete adblock-fast.config.dnsmasq_config_file_url
 set adblock-fast.config.config_update_enabled='0'
 set adblock-fast.config.force_dns='1'
 delete adblock-fast.config.force_dns_interface
-add_list adblock-fast.config.force_dns_interface='pixelmain'
-add_list adblock-fast.config.force_dns_interface='pixelsecondary'
+add_list adblock-fast.config.force_dns_interface='pixel'
+add_list adblock-fast.config.force_dns_interface='pixelthings'
 add_list adblock-fast.config.force_dns_interface='pixelguest'
 add_list adblock-fast.config.force_dns_interface='pixeliot'
 delete adblock-fast.config.force_dns_port

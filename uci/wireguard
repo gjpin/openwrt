@@ -13,8 +13,8 @@ set network.wgclient.public_key='${VPN_PUB}'
 add_list network.wgclient.allowed_ips='${VPN_CLIENT_ADDR}'
 add_list network.wgclient.allowed_ips='${VPN_CLIENT_ADDR6}'
 
-del_list firewall.pixelmain.network='${VPN_IF}'
-add_list firewall.pixelmain.network='${VPN_IF}'
+del_list firewall.pixel.network='${VPN_IF}'
+add_list firewall.pixel.network='${VPN_IF}'
 delete firewall.allow_wireguard
 set firewall.allow_wireguard='rule'
 set firewall.allow_wireguard.name='Allow-WireGuard'
