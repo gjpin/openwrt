@@ -291,6 +291,21 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         }
     assert dhcp["unrelated"]["ignore"] == "1"
     assert dhcp["dnsmasq"]["server"] == ["127.0.0.53#53"]
+    adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
+    sources = {name: section for name, section in adblock.items() if section[".type"] == "file_url"}
+    assert "unmanaged" not in adblock
+    assert len(sources) == 19
+    assert {section["name"] for section in sources.values()} == {
+        "HaGeZi - Multi PRO", "OISD", "Steven Black", "Peter Lowe",
+        "NextDNS - Windows", "NextDNS - Samsung", "NextDNS - Apple", "EasyList",
+        "HaGeZi - Prevent DNS bypass", "Smart TV", "HaGeZi - LG webOS",
+        "Smart TV blocklist", "Perflyst - Android tracking", "Divested - LG",
+        "Divested - Mobile", "GameIndustry - Gaming hosts", "AdGuard CNAME trackers",
+        "CERT Polska", "AdGuard",
+    }
+    assert all(section["action"] == "block" and section["enabled"] == "1" for section in sources.values())
+    assert sources["peter_lowe"]["url"].endswith("&mimetype=plaintext")
+    assert "/adblock/doh-vpn-proxy-bypass.txt" in sources["hagezi_dns_bypass"]["url"]
     assert (transaction_dir / "backup" / "dnscrypt-proxy.missing").exists()
     assert (transaction_dir / "candidate" / "wireless").stat().st_mode & 0o777 == 0o600
     rendered = (transaction_dir / "overlay" / "wireguard").read_text()
