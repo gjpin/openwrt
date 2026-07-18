@@ -26,7 +26,7 @@ wireless_module_preflight() {
 wireless_module_stage() {
     candidate_dir=$1
     overlay_file=$2
-    apply_overlay "$candidate_dir" wireless "$overlay_file"
+    apply_overlay "$candidate_dir" "$overlay_file"
     uci -q -c "$candidate_dir" set "wireless.pixelmain.key=$MAIN_WIFI_PASSWORD"
     uci -q -c "$candidate_dir" set "wireless.pixelsecondary.key=$SECONDARY_WIFI_PASSWORD"
     uci -q -c "$candidate_dir" set "wireless.pixelguest.key=$GUEST_WIFI_PASSWORD"

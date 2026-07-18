@@ -1,5 +1,4 @@
-# OpenWrt UCI batch overlay. This is not a complete /etc/config/firewall file.
-# The router-generated defaults and WAN zone remain in place.
+# Feature overlay: managed VLAN isolation policy.
 
 delete firewall.pixelmain
 set firewall.pixelmain='zone'

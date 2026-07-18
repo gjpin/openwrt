@@ -10,23 +10,19 @@ be selected or reordered by callers.
 The fixed, fail-fast execution order is:
 
 1. `base-packages.sh` updates package metadata and installs the common tools.
-2. `network.sh`, `firewall.sh`, and `wireless.sh` stage and validate one
-   rollback-capable transaction. All three candidates are installed before any
-   of their services are reloaded, and setup does not continue until the
-   transaction is confirmed.
-3. `dns-over-https.sh` installs and configures DNSCrypt Proxy, with dnsmasq and
-   DNSCrypt aligned on `127.0.0.53:53`.
-4. `adblock-fast.sh` installs `adblock-fast` and its LuCI app from the official
-   OpenWrt feeds, then configures four named block-list sources and forced DNS
-   for every managed VLAN.
-5. `wireguard.sh` creates stable named network, peer, and firewall sections and
-   attaches the VPN interface to the named `pixelmain` zone.
+2. The DNSCrypt, adblock-fast, and WireGuard modules install their packages and
+   enable the applicable init scripts. Package installation is intentionally
+   outside rollback.
+3. The six feature overlays in `uci/` are applied in network, firewall,
+   wireless, DNS, adblock-fast, and WireGuard order to one protected candidate.
+4. The candidate is validated, installed, and held pending until explicitly
+   confirmed from a recovery-capable session.
 
 `router-config.sh` owns shared preflight checks, candidate construction,
-checksums, backups, atomic installation, confirmation, and rollback. The three
-core modules own their package-specific stage, preflight, and candidate
-validation callbacks. This keeps the overlays separate without weakening the
-single network/firewall/wireless transaction boundary.
+checksums, backups, installation, confirmation, and rollback. Its boundary
+protects `network`, `firewall`, `wireless`, `dhcp`, `system`, `adblock-fast`, and
+the DNSCrypt TOML file. Modules contain installation and transaction callbacks;
+they perform no post-confirmation live UCI mutations.
 
 ## Secrets and input contract
 
@@ -52,8 +48,9 @@ export VPN_PSK='...'
 Setup validates every required variable, Wi-Fi password lengths, WireGuard key
 shape, the port range, address families, and a safe UCI interface name before
 the first router mutation. Wi-Fi keys are injected only into the protected
-transaction candidate; WireGuard secrets are passed directly to UCI and are
-never printed by the scripts.
+transaction candidate. WireGuard non-secret template values are rendered into a
+transaction-local overlay, while private and preshared keys are injected directly
+into the mode-0600 candidate and never printed by the scripts.
 
 ## Immutable bundle publication
 
@@ -89,7 +86,7 @@ which has this form:
 ```
 
 If confirmation does not arrive within the configured timeout (five minutes by
-default), the watchdog restores all three backups. The early-boot rollback
+default), the watchdog restores all six UCI packages and the DNSCrypt file. The early-boot rollback
 service also restores a transaction left pending across a reboot. To revert a
 confirmed transaction deliberately:
 
@@ -101,11 +98,13 @@ Backups and candidates are stored under `/root/router-config-backups` with
 checksummed manifests. Keep a separate off-router backup as well; automatic
 rollback cannot substitute for a physical recovery path.
 
-The files in `configs/openwrt/` are UCI batch overlays. They update named
-project sections in an existing router configuration; they are not complete
-replacements for `/etc/config/network`, `/etc/config/firewall`, or
-`/etc/config/wireless`. The router must retain its base loopback, globals, WAN,
-WAN6, firewall defaults, WAN zone, and `br_lan` device sections.
+The files in `uci/` are feature-oriented UCI batch overlays and may update more
+than one package. They update named project sections in an existing router
+configuration; they are not complete replacements. The router must retain its
+base loopback, globals, WAN, WAN6, firewall defaults, WAN zone, `br_lan` device,
+one unambiguous dnsmasq section, and the package-generated adblock-fast config.
+`ROUTER_CONFIG_UCI_DIR` overrides their location; the older
+`ROUTER_CONFIG_OVERLAY_DIR` remains a compatibility fallback.
 
 ## How the files connect
 
@@ -148,7 +147,7 @@ All four SSIDs use WPA3-SAE. Passwords are not stored in the overlay;
 
 ## Network and VLANs
 
-`configs/openwrt/network` defines four bridge VLANs on the existing `br-lan`
+`uci/network` defines four bridge VLANs on the existing `br-lan`
 device and assigns one static interface to each VLAN.
 
 ```text
@@ -178,7 +177,7 @@ and Secondary. `lan2` through `lan4` are untagged Main ports. The `*` on each
 
 ## Wireless
 
-`configs/openwrt/wireless` creates four access points on `radio0`. Each AP's
+`uci/wireless` creates four access points on `radio0`. Each AP's
 `network` option attaches it to the logical interface with the same name:
 
 ```text
@@ -195,7 +194,7 @@ assumes the target provides `radio0`, `br-lan`, and `lan1` through `lan4`.
 
 ## Firewall policy
 
-`configs/openwrt/firewall` places each logical network in a firewall zone of
+`uci/firewall` places each logical network in a firewall zone of
 the same name. Forwarding is allowlisted; any path not shown as allowed is
 rejected by the zone policies.
 
@@ -235,10 +234,21 @@ sections listed above create inter-zone paths.
 
 ## DHCP and base configuration
 
-No `/etc/config/dhcp` overlay is tracked. Each interface needs an explicit DHCP
-decision on the target router before clients can be expected to receive an
-address. DNS/DHCP firewall exceptions permit those services but do not configure
-or enable a DHCP server.
+`uci/network` creates a named DHCP pool for each managed VLAN with `ignore=0`,
+`start=100`, `limit=150`, and `leasetime=12h`. On each `/24`, dnsmasq therefore
+offers `.100` through `.249`, following the [OpenWrt DHCP pool
+semantics](https://openwrt.org/docs/guide-user/base-system/dhcp). Unrelated DHCP sections are preserved. A single
+stock anonymous dnsmasq section is named `dhcp.dnsmasq` only in the candidate by
+UCI export/rewrite/import; missing, multiple, or differently named dnsmasq
+sections are rejected as ambiguous.
+
+If no DNSCrypt TOML existed before apply, rollback removes the installed file;
+otherwise it restores the checksummed original. Installed packages and init
+enablement remain after rollback, with restored configuration controlling their
+subsequent behavior.
+
+Service coordination uses standard OpenWrt init actions as documented in
+[Managing services](https://openwrt.org/docs/guide-user/base-system/managing_services).
 
 Before applying network, firewall, or wireless changes, back up the router and
 have a local Ethernet or serial recovery path. Validate the staged configuration

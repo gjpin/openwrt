@@ -10,8 +10,8 @@ or wireless file can disconnect the router and require local recovery.
 
 - `setup.sh` installs packages and applies DNSCrypt, ad blocking, firewall, and
   WireGuard settings on an OpenWrt router.
-- `configs/openwrt/network`, `firewall`, and `wireless` are UCI configuration
-  files for the target router.
+- `uci/` contains feature-oriented UCI batch overlays for network, firewall,
+  wireless, DNS, adblock-fast, and WireGuard configuration.
 - `configs/dnscrypt/dnscrypt-proxy.toml` is the deployed dnscrypt-proxy2 config.
 
 ## Environment and execution safety
@@ -31,13 +31,13 @@ or wireless file can disconnect the router and require local recovery.
 
 ## Configuration invariants
 
-- Keep network names aligned across all three UCI files. Current VLAN interfaces
+- Keep network names aligned across the UCI feature overlays. Current VLAN interfaces
   are `pixelmain`, `pixelsecondary`, `pixelguest`, and `pixeliot`.
 - Keep VLAN IDs, bridge devices, subnets, wireless `network` values, firewall
   zones, and forwarding endpoints consistent as one change.
-- Every VLAN must have an explicit DHCP decision in `/etc/config/dhcp`. This file
-  is not currently tracked, so do not assume new interfaces will serve clients.
-- Preserve the isolation policy documented in `configs/openwrt/firewall`:
+- Every VLAN must have an explicit DHCP decision. The managed pools are declared
+  in `uci/network`; preserve their named sections and documented ranges.
+- Preserve the isolation policy documented in `uci/firewall`:
   PixelMain can reach WAN and the other VLANs; Guest and Secondary can reach WAN
   but not other VLANs; IoT has no WAN forwarding. All restricted VLANs need only
   the explicitly allowed router services such as DNS and DHCP.
@@ -71,10 +71,9 @@ or wireless file can disconnect the router and require local recovery.
   rules, redirects, list entries, or sections.
 - Download to a temporary file, verify that the download succeeded and is not
   empty, then install it. Do not overwrite a live config directly from a URL.
-- The current script downloads project configs from
-  `gjpin/homelab/.../router/configs`, not from this repository. When changing a
-  checked-in config, reconcile that source explicitly so deployment does not keep
-  using a stale or unrelated copy.
+- The setup script downloads an immutable release bundle from this repository.
+  When changing a checked-in overlay, rebuild and publish the bundle, then update
+  its pinned version and checksum together so deployment cannot use stale files.
 - Avoid unpinned remote installer execution. If an upstream installer must be
   used, pin a reviewed version or commit and document its provenance/checksum.
 - Group related UCI mutations, commit once per package, and reload services only

@@ -79,6 +79,42 @@ if command == "batch":
         if not line or line.startswith("#"): continue
         if mutate(shlex.split(line)) != 0: sys.exit(1)
     sys.exit(0)
+if command == "export":
+    package = args[0]
+    data = load(package)
+    print(f"package {package}")
+    for name, section_data in data.items():
+        section_type = section_data[".type"]
+        if name.startswith("@"): print(f"config {section_type}")
+        else: print(f"config {section_type} '{name}'")
+        for key, value in section_data.items():
+            if key == ".type": continue
+            values = value if isinstance(value, list) else [value]
+            keyword = "list" if isinstance(value, list) else "option"
+            for item in values: print(f"\t{keyword} {key} {shlex.quote(str(item))}")
+    sys.exit(0)
+if command == "import":
+    package = args[0]
+    data = {}
+    current = None
+    anonymous_counts = {}
+    for raw in sys.stdin:
+        words = shlex.split(raw, comments=True)
+        if not words or words[0] == "package": continue
+        if words[0] == "config":
+            section_type = words[1]
+            if len(words) > 2: current = words[2]
+            else:
+                index = anonymous_counts.get(section_type, 0)
+                anonymous_counts[section_type] = index + 1
+                current = f"@{section_type}[{index}]"
+            data[current] = {".type": section_type}
+        elif words[0] in ("option", "list") and current:
+            key, value = words[1], words[2]
+            if words[0] == "option": data[current][key] = value
+            else: data[current].setdefault(key, []).append(value)
+    save(package, data)
+    sys.exit(0)
 if command == "commit": sys.exit(0)
 if command in ("set", "add_list", "del_list", "delete"):
     sys.exit(mutate([command, args[0]]))
@@ -129,8 +165,9 @@ def router():
     config.mkdir(); bin_dir.mkdir(); overlays.mkdir(); modules.mkdir()
     for name in ("br-lan", "lan1", "lan2", "lan3", "lan4"):
         (sys_net / name).mkdir(parents=True)
-    for name in ("network", "firewall", "wireless"):
-        shutil.copy(REPO / "configs/openwrt" / name, overlays / name)
+    for name in ("network", "firewall", "wireless", "dns-over-https", "adblock-fast", "wireguard"):
+        shutil.copy(REPO / "uci" / name, overlays / name)
+    for name in ("network", "firewall", "wireless", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "modules" / f"{name}.sh", modules / f"{name}.sh")
 
     network = {
@@ -147,21 +184,41 @@ def router():
         "unrelated": {".type": "rule", "name": "Keep me"},
     }
     wireless = {"radio0": {".type": "wifi-device", "type": "mac80211", "channel": "auto"}}
-    for name, value in (("network", network), ("firewall", firewall), ("wireless", wireless)):
+    dhcp = {
+        "dnsmasq": {".type": "dnsmasq", "server": ["old"], "domainneeded": "1"},
+        "unrelated": {".type": "dhcp", "interface": "unrelated", "ignore": "1"},
+    }
+    system = {"ntp": {".type": "timeserver", "server": ["old"]}, "unrelated": {".type": "system", "hostname": "keep"}}
+    adblock = {"config": {".type": "adblock-fast", "enabled": "0"}, "unmanaged": {".type": "file_url", "name": "Keep me"}}
+    for name, value in (("network", network), ("firewall", firewall), ("wireless", wireless), ("dhcp", dhcp), ("system", system), ("adblock-fast", adblock)):
         (config / name).write_text(json.dumps(value))
 
     write_executable(bin_dir / "uci", UCI_STUB)
     write_executable(bin_dir / "ubus", "#!/bin/sh\nexit 0\n")
-    write_executable(bin_dir / "wifi", "#!/bin/sh\nexit 0\n")
-    write_executable(bin_dir / "fw4", "#!/bin/sh\n[ ! -e \"${FW4_FAIL_FILE:-/nonexistent}\" ]\n")
-    service = bin_dir / "service-stub"
-    write_executable(service, '''#!/bin/sh
-if [ -e "${SERVICE_FAIL_ONCE:-/nonexistent}" ]; then
-    rm -f "$SERVICE_FAIL_ONCE"
+    write_executable(bin_dir / "wifi", '''#!/bin/sh
+if [ -e "${WIFI_FAIL_ONCE:-/nonexistent}" ]; then
+    rm -f "$WIFI_FAIL_ONCE"
     exit 1
 fi
 exit 0
 ''')
+    write_executable(bin_dir / "fw4", "#!/bin/sh\n[ ! -e \"${FW4_FAIL_FILE:-/nonexistent}\" ]\n")
+    write_executable(bin_dir / "dnscrypt-proxy", "#!/bin/sh\n[ ! -e \"${DNSCRYPT_FAIL_FILE:-/nonexistent}\" ]\n")
+    service_source = '''#!/bin/sh
+service_name=${0##*/}
+if [ -e "${SERVICE_FAIL_ONCE:-/nonexistent}" ] &&
+    [ "${1-}" != stop ] &&
+    { [ -z "${SERVICE_FAIL_NAME:-}" ] || [ "$SERVICE_FAIL_NAME" = "$service_name" ]; } &&
+    { [ -z "${SERVICE_FAIL_ACTION:-}" ] || [ "$SERVICE_FAIL_ACTION" = "${1-}" ]; }; then
+    rm -f "$SERVICE_FAIL_ONCE"
+    exit 1
+fi
+exit 0
+'''
+    services = {}
+    for name in ("network-init", "firewall-init", "sysntpd-init", "dnscrypt-init", "dnsmasq-init", "adblock-init"):
+        services[name] = bin_dir / name
+        write_executable(services[name], service_source)
 
     env = {
         **os.environ,
@@ -173,16 +230,29 @@ exit 0
         "ROUTER_CONFIG_SYS_CLASS_NET": str(sys_net),
         "ROUTER_CONFIG_INIT_SCRIPT": str(init),
         "ROUTER_CONFIG_LIBEXEC": str(runtime),
-        "ROUTER_CONFIG_OVERLAY_DIR": str(overlays),
+        "ROUTER_CONFIG_UCI_DIR": str(overlays),
         "ROUTER_CONFIG_MODULE_DIR": str(modules),
-        "ROUTER_CONFIG_NETWORK_INIT": str(service),
-        "ROUTER_CONFIG_FIREWALL_INIT": str(service),
+        "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
+        "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
+        "ROUTER_CONFIG_SYSNTPD_INIT": str(services["sysntpd-init"]),
+        "ROUTER_CONFIG_DNSCRYPT_INIT": str(services["dnscrypt-init"]),
+        "ROUTER_CONFIG_DNSMASQ_INIT": str(services["dnsmasq-init"]),
+        "ROUTER_CONFIG_ADBLOCK_INIT": str(services["adblock-init"]),
+        "ROUTER_CONFIG_DNSCRYPT_CONFIG": str(tmp_path / "dnscrypt-live.toml"),
+        "ROUTER_CONFIG_DNSCRYPT_SOURCE": str(REPO / "configs/dnscrypt/dnscrypt-proxy.toml"),
         "ROUTER_CONFIG_TIMEOUT": "2",
         "ROUTER_CONFIG_POLL_INTERVAL": "0.05",
         "MAIN_WIFI_PASSWORD": "main-secret-123",
         "SECONDARY_WIFI_PASSWORD": "secondary-secret-123",
         "GUEST_WIFI_PASSWORD": "guest-secret-123",
         "IOT_WIFI_PASSWORD": "iot-secret-123",
+        "VPN_IF": "wgserver",
+        "VPN_PORT": "51820",
+        "VPN_KEY": "private-secret",
+        "VPN_ADDR": "10.10.0.1/24",
+        "VPN_ADDR6": "fd10::1/64",
+        "VPN_PUB": "public-key",
+        "VPN_PSK": "preshared-secret",
     }
     try:
         yield tmp_path, config, backups, overlays, env
@@ -198,7 +268,8 @@ def run_router(env, *args, check=True):
 
 
 def prepare(env):
-    result = run_router(env, "prepare", "--recovery-ready")
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode == 0, result.stderr
     return result, result.stdout.strip().splitlines()[-1]
 
 
@@ -211,15 +282,31 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert set(name for name in candidate if name == "pixelmain") == {"pixelmain"}
     assert "main-secret-123" not in result.stdout + result.stderr
     assert (backups / transaction).stat().st_mode & 0o777 == 0o700
+    transaction_dir = backups / transaction
+    dhcp = json.loads((transaction_dir / "candidate" / "dhcp").read_text())
+    for name in ("pixelmain", "pixelsecondary", "pixelguest", "pixeliot"):
+        assert dhcp[name] == {
+            ".type": "dhcp", "interface": name, "ignore": "0",
+            "start": "100", "limit": "150", "leasetime": "12h",
+        }
+    assert dhcp["unrelated"]["ignore"] == "1"
+    assert dhcp["dnsmasq"]["server"] == ["127.0.0.53#53"]
+    assert (transaction_dir / "backup" / "dnscrypt-proxy.missing").exists()
+    assert (transaction_dir / "candidate" / "wireless").stat().st_mode & 0o777 == 0o600
+    rendered = (transaction_dir / "overlay" / "wireguard").read_text()
+    assert env["VPN_KEY"] not in rendered
+    assert env["VPN_PSK"] not in rendered
+    assert "${" not in rendered
 
 
 def test_repeated_prepare_is_idempotent(router):
     _, config, backups, _, env = router
     _, first = prepare(env)
-    for name in ("network", "firewall", "wireless"):
+    for name in ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast"):
         shutil.copy(backups / first / "candidate" / name, config / name)
+    shutil.copy(backups / first / "candidate" / "dnscrypt-proxy.toml", env["ROUTER_CONFIG_DNSCRYPT_CONFIG"])
     _, second = prepare(env)
-    for name in ("network", "firewall", "wireless"):
+    for name in ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast"):
         data = json.loads((backups / second / "candidate" / name).read_text())
         assert len(data) == len(set(data))
     assert json.loads((backups / second / "candidate" / "network").read_text())["br_lan"]["stp"] == "1"
@@ -240,7 +327,7 @@ def test_placeholder_and_lock_are_rejected(router):
         stream.write("\nset network.pixelmain.bad='${UNRESOLVED}'\n")
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert "unresolved placeholder" in result.stderr
-    (overlays / "network").write_text((REPO / "configs/openwrt/network").read_text())
+    (overlays / "network").write_text((REPO / "uci/network").read_text())
     lock = root / "lock"; lock.mkdir(); (lock / "pid").write_text(str(os.getpid()))
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert "another operation holds" in result.stderr
@@ -257,7 +344,7 @@ def test_missing_transaction_module_is_rejected(router):
 
 def test_apply_confirm_and_manual_rollback(router):
     _, config, backups, _, env = router
-    original = (config / "network").read_text()
+    originals = {name: (config / name).read_text() for name in ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast")}
     _, transaction = prepare(env)
     process = subprocess.Popen(
         [str(REPO / "router-config.sh"), "apply", transaction], env=env,
@@ -278,8 +365,10 @@ def test_apply_confirm_and_manual_rollback(router):
     assert process.returncode == 0, stderr
     assert "confirm" in stdout
     assert json.loads((config / "network").read_text())["pixelmain"]["ipaddr"] == "192.168.1.1"
+    assert Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"]).exists()
     run_router(env, "rollback", transaction)
-    assert (config / "network").read_text() == original
+    assert {name: (config / name).read_text() for name in originals} == originals
+    assert not Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"]).exists()
 
 
 def test_timeout_and_reboot_recovery_restore_backup(router):
@@ -313,21 +402,55 @@ def test_fw4_failure_does_not_change_live_configuration(router):
 def test_apply_fw4_and_reload_failures_restore_backup(router):
     root, config, backups, _, env = router
     original = (config / "network").read_text()
+    dnscrypt_live = Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"])
+    dnscrypt_live.write_text("original dnscrypt configuration\n")
     _, transaction = prepare(env)
     fail_file = root / "fw4-fail"; fail_file.touch(); env["FW4_FAIL_FILE"] = str(fail_file)
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
-    assert "backup restored" in result.stderr
+    assert "backups restored" in result.stderr
     assert (config / "network").read_text() == original
+    assert dnscrypt_live.read_text() == "original dnscrypt configuration\n"
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
     fail_file.unlink(); env.pop("FW4_FAIL_FILE")
     _, transaction = prepare(env)
     service_fail = root / "service-fail"; service_fail.touch(); env["SERVICE_FAIL_ONCE"] = str(service_fail)
+    env["SERVICE_FAIL_NAME"] = "network-init"
+    env["SERVICE_FAIL_ACTION"] = "restart"
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert "service reload failed" in result.stderr
     assert (config / "network").read_text() == original
+    assert (backups / transaction / "state").read_text().strip() == "rolledback"
+
+
+@pytest.mark.parametrize(("service_name", "action"), [
+    ("wifi", "reload"),
+    ("firewall-init", "reload"),
+    ("sysntpd-init", "restart"),
+    ("dnscrypt-init", "restart"),
+    ("dnsmasq-init", "restart"),
+    ("adblock-init", "restart"),
+])
+def test_each_coordinated_service_failure_restores_every_file(router, service_name, action):
+    root, config, backups, _, env = router
+    names = ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast")
+    originals = {name: (config / name).read_text() for name in names}
+    _, transaction = prepare(env)
+    fail = root / f"{service_name}-fail"
+    fail.touch()
+    if service_name == "wifi":
+        env["WIFI_FAIL_ONCE"] = str(fail)
+    else:
+        env["SERVICE_FAIL_ONCE"] = str(fail)
+        env["SERVICE_FAIL_NAME"] = service_name
+        env["SERVICE_FAIL_ACTION"] = action
+    result = run_router(env, "apply", transaction, check=False)
+    assert result.returncode != 0
+    assert "service reload failed" in result.stderr
+    assert {name: (config / name).read_text() for name in names} == originals
+    assert not Path(env["ROUTER_CONFIG_DNSCRYPT_CONFIG"]).exists()
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
@@ -341,6 +464,28 @@ def test_transaction_tampering_is_rejected(router):
     assert result.returncode != 0
     assert "checksum verification failed" in result.stderr
     assert (config / "network").read_text() == original
+
+
+def test_partial_candidate_installation_failure_restores_all_packages(router):
+    root, config, backups, _, env = router
+    names = ("network", "firewall", "wireless", "dhcp", "system", "adblock-fast")
+    originals = {name: (config / name).read_text() for name in names}
+    _, transaction = prepare(env)
+    fail = root / "install-fail"
+    fail.touch()
+    write_executable(root / "bin" / "cp", f'''#!/bin/sh
+if [ -e "{fail}" ]; then
+    case "$1" in
+        */candidate/firewall) rm -f "{fail}"; exit 1 ;;
+    esac
+fi
+exec /usr/bin/cp "$@"
+''')
+    result = run_router(env, "apply", transaction, check=False)
+    assert result.returncode != 0
+    assert "candidate installation failed" in result.stderr
+    assert {name: (config / name).read_text() for name in names} == originals
+    assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
 def test_bundle_contains_every_module(tmp_path):
@@ -361,6 +506,13 @@ def test_bundle_contains_every_module(tmp_path):
         )
     }
     assert expected <= members
+    assert {
+        f"uci/{name}" for name in (
+            "network", "firewall", "wireless", "dns-over-https",
+            "adblock-fast", "wireguard",
+        )
+    } <= members
+    assert not any(member.startswith("configs/openwrt") for member in members)
     retired_name = "adblock" + "-lean"
     assert not any(retired_name in member for member in members)
 
@@ -457,118 +609,77 @@ def run_module(env, module_name, function_call):
     return result
 
 
-def test_dns_and_wireguard_modules_are_idempotent(router):
+def test_unique_anonymous_dnsmasq_is_named_in_candidate_only(router):
+    _, config, backups, _, env = router
+    dhcp = json.loads((config / "dhcp").read_text())
+    dhcp["@dnsmasq[0]"] = dhcp.pop("dnsmasq")
+    (config / "dhcp").write_text(json.dumps(dhcp))
+    original = (config / "dhcp").read_text()
+    _, transaction = prepare(env)
+    candidate = json.loads((backups / transaction / "candidate" / "dhcp").read_text())
+    assert "dnsmasq" in candidate
+    assert "@dnsmasq[0]" not in candidate
+    assert (config / "dhcp").read_text() == original
+
+
+@pytest.mark.parametrize("sections", [
+    {},
+    {"other_name": {".type": "dnsmasq"}},
+    {"@dnsmasq[0]": {".type": "dnsmasq"}, "@dnsmasq[1]": {".type": "dnsmasq"}},
+])
+def test_missing_or_ambiguous_dnsmasq_is_rejected(router, sections):
+    _, config, backups, _, env = router
+    (config / "dhcp").write_text(json.dumps(sections))
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert "dnsmasq" in result.stderr
+    assert not backups.exists()
+
+
+def test_dnscrypt_validation_and_endpoint_mismatch_are_preapply_failures(router):
     root, config, _, _, env = router
-    env["UCI_STUB_CONFIG_DIR"] = str(config)
-    env.update({
-        "VPN_IF": "wgserver",
-        "VPN_PORT": "51820",
-        "VPN_KEY": "private-secret",
-        "VPN_ADDR": "10.10.0.1/24",
-        "VPN_ADDR6": "fd10::1/64",
-        "VPN_PUB": "public-secret",
-        "VPN_PSK": "preshared-secret",
-    })
-    write_executable(root / "bin" / "apk", "#!/bin/sh\nexit 0\n")
-    write_executable(root / "bin" / "dnscrypt-proxy", "#!/bin/sh\nexit 0\n")
-    write_executable(root / "bin" / "service", "#!/bin/sh\nexit 0\n")
-    dnscrypt_target = root / "dnscrypt-proxy.toml"
-    env["DNSCRYPT_CONFIG_FILE"] = str(dnscrypt_target)
-    (config / "dhcp").write_text(json.dumps({"@dnsmasq[0]": {".type": "dnsmasq", "server": ["old"]}}))
-    (config / "system").write_text(json.dumps({"ntp": {".type": "timeserver", "server": ["old"]}}))
+    original = (config / "network").read_text()
+    fail = root / "dnscrypt-fail"
+    fail.touch()
+    env["DNSCRYPT_FAIL_FILE"] = str(fail)
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert "DNSCrypt rejected candidate" in result.stderr
+    assert (config / "network").read_text() == original
 
-    run_module(env, "dns-over-https.sh", f'dns_over_https_run "{REPO}"')
-    first_dns = {name: (config / name).read_text() for name in ("dhcp", "system", "network", "firewall")}
-    run_module(env, "dns-over-https.sh", f'dns_over_https_run "{REPO}"')
-    assert first_dns == {name: (config / name).read_text() for name in first_dns}
-    assert "127.0.0.53:53" in dnscrypt_target.read_text()
-    assert json.loads((config / "dhcp").read_text())["@dnsmasq[0]"]["server"] == ["127.0.0.53#53"]
-
-    run_module(env, "wireguard.sh", "wireguard_run")
-    first_wg = {name: (config / name).read_text() for name in ("network", "firewall")}
-    run_module(env, "wireguard.sh", "wireguard_run")
-    assert first_wg == {name: (config / name).read_text() for name in first_wg}
-    firewall = json.loads((config / "firewall").read_text())
-    assert firewall["pixelmain"]["network"].count("wgserver") == 1
-    assert [name for name in firewall if name == "allow_wireguard"] == ["allow_wireguard"]
+    fail.unlink()
+    env.pop("DNSCRYPT_FAIL_FILE")
+    mismatched = root / "dnscrypt-mismatch.toml"
+    mismatched.write_text(
+        (REPO / "configs/dnscrypt/dnscrypt-proxy.toml").read_text().replace(
+            "127.0.0.53:53", "127.0.0.54:53", 1
+        )
+    )
+    env["ROUTER_CONFIG_DNSCRYPT_SOURCE"] = str(mismatched)
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert "does not match dnsmasq upstream" in result.stderr
 
 
-def test_adblock_fast_is_apk_installed_configured_and_idempotent(router):
+def test_feature_install_callbacks_only_install_and_enable(router):
     root, config, _, _, env = router
-    env["UCI_STUB_CONFIG_DIR"] = str(config)
-    (config / "adblock-fast").write_text(json.dumps({
-        "config": {
-            ".type": "adblock-fast",
-            "enabled": "0",
-            "force_dns_interface": ["lan"],
-            "force_dns_port": ["53"],
-        },
-        "unmanaged": {
-            ".type": "file_url",
-            "name": "Keep me",
-            "url": "https://example.invalid/list.txt",
-        },
-    }))
+    names = ("network", "firewall", "dhcp", "adblock-fast")
+    before = {name: (config / name).read_text() for name in names}
     apk_log = root / "apk.log"
-    service_log = root / "service.log"
+    init_log = root / "init.log"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{apk_log}'\n")
-    write_executable(root / "bin" / "service", f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{service_log}'\n")
-
-    run_module(env, "adblock-fast.sh", "adblock_fast_run")
-    first = (config / "adblock-fast").read_text()
-    run_module(env, "adblock-fast.sh", "adblock_fast_run")
-    assert first == (config / "adblock-fast").read_text()
-
-    data = json.loads(first)
-    assert data["config"]["enabled"] == "1"
-    assert data["config"]["dns"] == "dnsmasq.servers"
-    assert data["config"]["force_dns"] == "1"
-    assert data["config"]["force_dns_interface"] == [
-        "pixelmain", "pixelsecondary", "pixelguest", "pixeliot",
-    ]
-    assert data["config"]["force_dns_port"] == ["53", "853"]
-    assert data["config"]["download_allow_insecure"] == "0"
-    assert data["config"]["allow_non_ascii"] == "0"
-    assert data["unmanaged"]["name"] == "Keep me"
-
-    sources = {
-        "adguard_general": (
-            "AdGuard general",
-            "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
-        ),
-        "hagezi_pro": (
-            "Hagezi Pro",
-            "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt",
-        ),
-        "adguard_cname_trackers": (
-            "AdGuard CNAME trackers",
-            "https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_trackers_justdomains.txt",
-        ),
-        "cert_polska": (
-            "CERT Polska",
-            "https://hole.cert.pl/domains/v2/domains.txt",
-        ),
-    }
-    assert {
-        name: (section["name"], section["url"])
-        for name, section in data.items()
-        if name in sources
-    } == sources
-    for name in sources:
-        assert data[name][".type"] == "file_url"
-        assert data[name]["action"] == "block"
-        assert data[name]["enabled"] == "1"
-
+    init = root / "bin" / "init-install"
+    write_executable(init, f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{init_log}'\n")
+    env["ROUTER_CONFIG_DNSCRYPT_INIT"] = str(init)
+    env["ROUTER_CONFIG_ADBLOCK_INIT"] = str(init)
+    run_module(env, "dns-over-https.sh", "dns_over_https_install")
+    run_module(env, "adblock-fast.sh", "adblock_fast_install")
+    run_module(env, "wireguard.sh", "wireguard_install")
     assert apk_log.read_text().splitlines() == [
+        "add dnscrypt-proxy2",
         "add adblock-fast luci-app-adblock-fast",
-        "add adblock-fast luci-app-adblock-fast",
+        "add wireguard-tools luci-proto-wireguard",
     ]
-    assert service_log.read_text().splitlines() == [
-        "adblock-fast enable", "adblock-fast restart",
-        "adblock-fast enable", "adblock-fast restart",
-    ]
-    source = (REPO / "modules" / "adblock-fast.sh").read_text()
-    assert source.count("uci commit adblock-fast") == 1
+    assert init_log.read_text().splitlines() == ["enable", "enable"]
+    assert {name: (config / name).read_text() for name in names} == before
 
 
 def test_all_package_installation_uses_apk(router):
@@ -589,35 +700,14 @@ def test_all_package_installation_uses_apk(router):
     assert "apk add wireguard-tools luci-proto-wireguard" in project_shell
 
 
-def test_adblock_fast_restart_failure_is_propagated(router):
-    root, config, _, _, env = router
-    env["UCI_STUB_CONFIG_DIR"] = str(config)
-    (config / "adblock-fast").write_text(json.dumps({
-        "config": {".type": "adblock-fast"},
-    }))
-    write_executable(root / "bin" / "apk", "#!/bin/sh\nexit 0\n")
-    write_executable(
-        root / "bin" / "service",
-        "#!/bin/sh\n[ \"$2\" != restart ]\n",
-    )
-    result = subprocess.run(
-        [
-            "sh", "-eu", "-c",
-            f'. "{REPO / "modules" / "adblock-fast.sh"}"; adblock_fast_run',
-        ],
-        env=env, text=True, capture_output=True,
-    )
-    assert result.returncode != 0
-
-
 def test_setup_declares_fixed_module_order_and_all_members():
     source = (REPO / "setup.sh").read_text()
     calls = [
         "base_packages_run",
+        "dns_over_https_install",
+        "adblock_fast_install",
+        "wireguard_install",
         'router-config.sh\" prepare',
-        "dns_over_https_run",
-        "adblock_fast_run",
-        "wireguard_run",
     ]
     positions = [source.rindex(call) for call in calls]
     assert positions == sorted(positions)
@@ -628,4 +718,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
         assert f"modules/{name}.sh" in source
     assert "adblock" + "-lean" not in source
     assert "--recovery-ready" in source
+    assert "dns_over_https_run" not in source
+    assert "adblock_fast_run" not in source
+    assert "wireguard_run" not in source
     assert "adblock selector" not in (REPO / "README.md").read_text().lower()

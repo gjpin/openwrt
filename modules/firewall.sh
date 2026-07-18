@@ -14,7 +14,7 @@ firewall_module_preflight() {
 firewall_module_stage() {
     candidate_dir=$1
     overlay_file=$2
-    apply_overlay "$candidate_dir" firewall "$overlay_file"
+    apply_overlay "$candidate_dir" "$overlay_file"
 }
 
 firewall_module_validate() {

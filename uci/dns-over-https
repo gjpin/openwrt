@@ -1,0 +1,40 @@
+# Feature overlay: DNSCrypt upstream, NTP bootstrap, and encrypted-DNS policy.
+
+set dhcp.dnsmasq.noresolv='1'
+set dhcp.dnsmasq.cachesize='0'
+delete dhcp.dnsmasq.server
+add_list dhcp.dnsmasq.server='127.0.0.53#53'
+
+delete system.ntp.server
+add_list system.ntp.server='194.177.4.1'
+add_list system.ntp.server='213.222.217.11'
+add_list system.ntp.server='80.50.102.114'
+add_list system.ntp.server='193.219.28.60'
+
+set network.wan.peerdns='0'
+set network.wan6.peerdns='0'
+
+delete firewall.divert_dns_53
+set firewall.divert_dns_53='redirect'
+set firewall.divert_dns_53.name='Divert-DNS, port 53'
+set firewall.divert_dns_53.src='wan'
+set firewall.divert_dns_53.dest='lan'
+set firewall.divert_dns_53.src_dport='53'
+set firewall.divert_dns_53.dest_port='53'
+set firewall.divert_dns_53.target='DNAT'
+delete firewall.reject_dot_853
+set firewall.reject_dot_853='rule'
+set firewall.reject_dot_853.name='Reject-DoT, port 853'
+set firewall.reject_dot_853.src='lan'
+set firewall.reject_dot_853.dest='wan'
+set firewall.reject_dot_853.dest_port='853'
+set firewall.reject_dot_853.proto='tcp'
+set firewall.reject_dot_853.target='REJECT'
+delete firewall.divert_dns_5353
+set firewall.divert_dns_5353='redirect'
+set firewall.divert_dns_5353.name='Divert-DNS, port 5353'
+set firewall.divert_dns_5353.src='lan'
+set firewall.divert_dns_5353.dest='lan'
+set firewall.divert_dns_5353.src_dport='5353'
+set firewall.divert_dns_5353.dest_port='53'
+set firewall.divert_dns_5353.target='DNAT'

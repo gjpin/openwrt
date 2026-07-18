@@ -18,12 +18,15 @@ output_path=$output_directory/$(basename -- "$1")
 staging_directory=$(mktemp -d)
 trap 'rm -rf "$staging_directory"' EXIT HUP INT TERM
 
-mkdir -p "$staging_directory/configs/openwrt" "$staging_directory/configs/dnscrypt" "$staging_directory/modules"
+mkdir -p "$staging_directory/uci" "$staging_directory/configs/dnscrypt" "$staging_directory/modules"
 cp "$repository_dir/router-config.sh" "$repository_dir/router-config-rollback.init" "$staging_directory/"
-cp "$repository_dir/configs/openwrt/network" \
-    "$repository_dir/configs/openwrt/firewall" \
-    "$repository_dir/configs/openwrt/wireless" \
-    "$staging_directory/configs/openwrt/"
+cp "$repository_dir/uci/network" \
+    "$repository_dir/uci/firewall" \
+    "$repository_dir/uci/wireless" \
+    "$repository_dir/uci/dns-over-https" \
+    "$repository_dir/uci/adblock-fast" \
+    "$repository_dir/uci/wireguard" \
+    "$staging_directory/uci/"
 cp "$repository_dir/configs/dnscrypt/dnscrypt-proxy.toml" "$staging_directory/configs/dnscrypt/"
 cp "$repository_dir/modules/base-packages.sh" \
     "$repository_dir/modules/network.sh" \
@@ -37,6 +40,6 @@ cp "$repository_dir/modules/base-packages.sh" \
 (
     cd "$staging_directory"
     tar -czf "$output_path" \
-        router-config.sh router-config-rollback.init configs/openwrt configs/dnscrypt modules
+        router-config.sh router-config-rollback.init uci configs/dnscrypt modules
 )
 sha256sum "$output_path"

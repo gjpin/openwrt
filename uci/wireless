@@ -1,5 +1,4 @@
-# OpenWrt UCI batch overlay. This is not a complete /etc/config/wireless file.
-# Keys are injected by router-config.sh and never stored in this fragment.
+# Feature overlay: managed access points. Keys are injected into the candidate.
 
 delete wireless.pixelmain
 set wireless.pixelmain='wifi-iface'

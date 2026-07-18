@@ -1,36 +1,46 @@
 #!/bin/sh
 
-# Internal module sourced by setup.sh.
+# WireGuard package installation and transaction callbacks.
 
-wireguard_run() {
+wireguard_install() {
     apk add wireguard-tools luci-proto-wireguard
+}
 
-    uci -q delete "network.$VPN_IF" 2>/dev/null || :
-    uci set "network.$VPN_IF=interface"
-    uci set "network.$VPN_IF.proto=wireguard"
-    uci set "network.$VPN_IF.private_key=$VPN_KEY"
-    uci set "network.$VPN_IF.listen_port=$VPN_PORT"
-    uci add_list "network.$VPN_IF.addresses=$VPN_ADDR"
-    uci add_list "network.$VPN_IF.addresses=$VPN_ADDR6"
-    uci -q delete network.wgclient 2>/dev/null || :
-    uci set "network.wgclient=wireguard_$VPN_IF"
-    uci set "network.wgclient.public_key=$VPN_PUB"
-    uci set "network.wgclient.preshared_key=$VPN_PSK"
-    uci add_list "network.wgclient.allowed_ips=${VPN_ADDR%.*}.2/32"
-    uci add_list "network.wgclient.allowed_ips=${VPN_ADDR6%:*}:2/128"
-    uci commit network
+wireguard_render_overlay() {
+    source_file=$1
+    rendered_file=$2
+    vpn_client_addr=${VPN_ADDR%.*}.2/32
+    vpn_client_addr6=${VPN_ADDR6%:*}:2/128
+    sed \
+        -e "s|\${VPN_IF}|$VPN_IF|g" \
+        -e "s|\${VPN_PORT}|$VPN_PORT|g" \
+        -e "s|\${VPN_ADDR6}|$VPN_ADDR6|g" \
+        -e "s|\${VPN_ADDR}|$VPN_ADDR|g" \
+        -e "s|\${VPN_PUB}|$VPN_PUB|g" \
+        -e "s|\${VPN_CLIENT_ADDR6}|$vpn_client_addr6|g" \
+        -e "s|\${VPN_CLIENT_ADDR}|$vpn_client_addr|g" \
+        "$source_file" >"$rendered_file" || die 'failed to render WireGuard overlay'
+    chmod 600 "$rendered_file"
+    # shellcheck disable=SC2016
+    grep -F '${' "$rendered_file" >/dev/null 2>&1 && die 'unresolved placeholder in rendered WireGuard overlay'
+    return 0
+}
 
-    uci del_list "firewall.pixelmain.network=$VPN_IF" 2>/dev/null || :
-    uci add_list "firewall.pixelmain.network=$VPN_IF"
-    uci -q delete firewall.allow_wireguard 2>/dev/null || :
-    uci set firewall.allow_wireguard='rule'
-    uci set firewall.allow_wireguard.name='Allow-WireGuard'
-    uci set firewall.allow_wireguard.src='wan'
-    uci set "firewall.allow_wireguard.dest_port=$VPN_PORT"
-    uci set firewall.allow_wireguard.proto='udp'
-    uci set firewall.allow_wireguard.target='ACCEPT'
-    uci commit firewall
+wireguard_stage() {
+    candidate_dir=$1
+    overlay_file=$2
+    apply_overlay "$candidate_dir" "$overlay_file"
+    uci -q -c "$candidate_dir" set "network.$VPN_IF.private_key=$VPN_KEY" ||
+        die 'failed to inject WireGuard private key'
+    uci -q -c "$candidate_dir" set "network.wgclient.preshared_key=$VPN_PSK" ||
+        die 'failed to inject WireGuard preshared key'
+    uci -q -c "$candidate_dir" commit network || die 'failed to serialize WireGuard candidate'
+}
 
-    service network restart
-    service firewall restart
+wireguard_validate() {
+    candidate_dir=$1
+    [ "$(uci_get "$candidate_dir" "network.$VPN_IF")" = interface ] || die 'WireGuard interface is missing'
+    [ "$(uci_get "$candidate_dir" network.wgclient)" = "wireguard_$VPN_IF" ] || die 'WireGuard peer is missing'
+    [ -n "$(uci_get "$candidate_dir" "network.$VPN_IF.private_key")" ] || die 'WireGuard private key is missing'
+    [ -n "$(uci_get "$candidate_dir" network.wgclient.preshared_key)" ] || die 'WireGuard preshared key is missing'
 }

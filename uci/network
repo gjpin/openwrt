@@ -1,9 +1,6 @@
-# OpenWrt UCI batch overlay. This is not a complete /etc/config/network file.
-# Project-owned sections are recreated by stable name. The router-generated
-# loopback, globals, WAN/WAN6, and br_lan device sections remain in place.
+# Feature overlay: managed VLANs and their DHCP pools.
+# This is applied to an existing OpenWrt configuration, not installed directly.
 
-# Normalize only the four supported DSA ports. Preflight rejects any other
-# br_lan port, while all unrelated br_lan options are preserved.
 del_list network.br_lan.ports='lan1'
 del_list network.br_lan.ports='lan2'
 del_list network.br_lan.ports='lan3'
@@ -68,3 +65,35 @@ set network.pixeliot.device='br-lan.3'
 set network.pixeliot.proto='static'
 set network.pixeliot.ipaddr='192.168.3.1'
 set network.pixeliot.netmask='255.255.255.0'
+
+delete dhcp.pixelmain
+set dhcp.pixelmain='dhcp'
+set dhcp.pixelmain.interface='pixelmain'
+set dhcp.pixelmain.ignore='0'
+set dhcp.pixelmain.start='100'
+set dhcp.pixelmain.limit='150'
+set dhcp.pixelmain.leasetime='12h'
+
+delete dhcp.pixelsecondary
+set dhcp.pixelsecondary='dhcp'
+set dhcp.pixelsecondary.interface='pixelsecondary'
+set dhcp.pixelsecondary.ignore='0'
+set dhcp.pixelsecondary.start='100'
+set dhcp.pixelsecondary.limit='150'
+set dhcp.pixelsecondary.leasetime='12h'
+
+delete dhcp.pixelguest
+set dhcp.pixelguest='dhcp'
+set dhcp.pixelguest.interface='pixelguest'
+set dhcp.pixelguest.ignore='0'
+set dhcp.pixelguest.start='100'
+set dhcp.pixelguest.limit='150'
+set dhcp.pixelguest.leasetime='12h'
+
+delete dhcp.pixeliot
+set dhcp.pixeliot='dhcp'
+set dhcp.pixeliot.interface='pixeliot'
+set dhcp.pixeliot.ignore='0'
+set dhcp.pixeliot.start='100'
+set dhcp.pixeliot.limit='150'
+set dhcp.pixeliot.leasetime='12h'

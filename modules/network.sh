@@ -30,12 +30,15 @@ network_module_preflight() {
     if uci -q -c "$CONFIG_DIR" show network | grep -E "network\.@(interface|bridge-vlan)\[[0-9]+\].*(pixelmain|pixelsecondary|pixelguest|pixeliot|br-lan\.[1-4])" >/dev/null; then
         die 'anonymous project network section found; migrate it to a named section first'
     fi
+
+    canonicalize_dnsmasq "$CONFIG_DIR" check
 }
 
 network_module_stage() {
     candidate_dir=$1
     overlay_file=$2
-    apply_overlay "$candidate_dir" network "$overlay_file"
+    canonicalize_dnsmasq "$candidate_dir" rewrite
+    apply_overlay "$candidate_dir" "$overlay_file"
 }
 
 network_module_validate() {
@@ -47,5 +50,10 @@ network_module_validate() {
     done
     for section_name in pixelmain pixelsecondary pixelguest pixeliot; do
         [ "$(uci_get "$candidate_dir" "network.$section_name")" = interface ] || die "missing network.$section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name")" = dhcp ] || die "missing dhcp.$section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name.ignore")" = 0 ] || die "DHCP is not enabled for $section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name.start")" = 100 ] || die "unexpected DHCP start for $section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name.limit")" = 150 ] || die "unexpected DHCP limit for $section_name"
+        [ "$(uci_get "$candidate_dir" "dhcp.$section_name.leasetime")" = 12h ] || die "unexpected DHCP lease time for $section_name"
     done
 }

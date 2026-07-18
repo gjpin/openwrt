@@ -102,6 +102,7 @@ validate_inputs() {
 # mutation. Error messages intentionally name variables but never print values.
 validate_inputs
 export MAIN_WIFI_PASSWORD SECONDARY_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
+export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_ADDR6 VPN_PUB VPN_PSK
 
 bundle_archive=$(mktemp /tmp/router-config-bundle.XXXXXX.tar.gz)
 bundle_directory=$(mktemp -d /tmp/router-config-bundle.XXXXXX)
@@ -117,7 +118,8 @@ printf '%s  %s\n' "$ROUTER_CONFIG_BUNDLE_SHA256" "$bundle_archive" | sha256sum -
 tar -xzf "$bundle_archive" -C "$bundle_directory"
 for bundle_file in \
     router-config.sh router-config-rollback.init \
-    configs/openwrt/network configs/openwrt/firewall configs/openwrt/wireless \
+    uci/network uci/firewall uci/wireless uci/dns-over-https \
+    uci/adblock-fast uci/wireguard \
     configs/dnscrypt/dnscrypt-proxy.toml \
     modules/base-packages.sh modules/network.sh modules/firewall.sh \
     modules/wireless.sh modules/dns-over-https.sh modules/adblock-fast.sh \
@@ -135,13 +137,12 @@ chmod 700 "$bundle_directory/router-config.sh"
 . "$bundle_directory/modules/wireguard.sh"
 
 base_packages_run
+dns_over_https_install
+adblock_fast_install
+wireguard_install
 
 prepare_output=$("$bundle_directory/router-config.sh" prepare --recovery-ready)
 printf '%s\n' "$prepare_output"
 transaction_id=$(printf '%s\n' "$prepare_output" | sed -n '$p')
 [ -n "$transaction_id" ] || die 'router-config did not return a transaction ID'
 "$bundle_directory/router-config.sh" apply "$transaction_id"
-
-dns_over_https_run "$bundle_directory"
-adblock_fast_run
-wireguard_run
