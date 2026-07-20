@@ -10,18 +10,6 @@ cd "$(dirname "$0")/../.."
 fail() {
     failure=$*
     printf 'vm-test: %s\n' "$failure" >&2
-    for package in network firewall wireless; do
-        uci export "$package" 2>&1 | sed -e '/private_key/d' -e '/preshared_key/d' -e '/option key /d' >&2 || :
-    done
-    fw4 print >&2 2>&1 || :
-    nft list ruleset >&2 2>&1 || :
-    for service in network firewall sysntpd https-dns-proxy dnsmasq adblock-fast; do
-        "/etc/init.d/$service" status >&2 2>&1 || :
-    done
-    printf '%s\n' '--- transaction state ---' >&2
-    find /root/router-config-backups -mindepth 2 -maxdepth 2 \
-        \( -name state -o -name pending \) -print -exec sed -n '1p' {} \; >&2 2>&1 || :
-    printf '%s\n' '--- end transaction state ---' >&2
     printf '%s\n' '--- transaction lock ---' >&2
     if [ -e /var/lock/router-config.lock ]; then
         ls -la /var/lock/router-config.lock >&2 2>&1 || :
@@ -38,12 +26,24 @@ fail() {
         printf '%s\n' 'lock path absent' >&2
     fi
     printf '%s\n' '--- end transaction lock ---' >&2
-    logread >&2 2>&1 || :
+    printf '%s\n' '--- transaction state ---' >&2
+    find /root/router-config-backups -mindepth 2 -maxdepth 2 \
+        \( -name state -o -name pending \) -print -exec sed -n '1p' {} \; >&2 2>&1 || :
+    printf '%s\n' '--- end transaction state ---' >&2
     if [ -s /tmp/setup.log ]; then
         printf '%s\n' '--- setup log ---' >&2
         tail -n 200 /tmp/setup.log >&2 2>&1 || :
         printf '%s\n' '--- end setup log ---' >&2
     fi
+    for package in network firewall wireless; do
+        uci export "$package" 2>&1 | sed -e '/private_key/d' -e '/preshared_key/d' -e '/option key /d' >&2 || :
+    done
+    fw4 print >&2 2>&1 || :
+    nft list ruleset >&2 2>&1 || :
+    for service in network firewall sysntpd https-dns-proxy dnsmasq adblock-fast; do
+        "/etc/init.d/$service" status >&2 2>&1 || :
+    done
+    logread >&2 2>&1 || :
     if [ -s /tmp/vm-test-failure-detail ]; then
         printf '%s\n' '--- failure detail ---' >&2
         cat /tmp/vm-test-failure-detail >&2 2>&1 || :
@@ -314,7 +314,9 @@ run_and_confirm() {
     setup_pid=$!
     pending=
     attempts=0
-    while [ "$attempts" -lt 180 ]; do
+    # Package install plus apply/reload (especially adblock-fast) can exceed three
+    # minutes on the emulated AArch64 CI VM, so wait well beyond that.
+    while [ "$attempts" -lt 900 ]; do
         attempts=$((attempts + 1))
         pending=$(find /root/router-config-backups -name pending -type f 2>/dev/null | sort | tail -n 1)
         [ -z "$pending" ] || break
@@ -326,16 +328,22 @@ run_and_confirm() {
     done
     [ -n "$pending" ] || fail 'setup did not create a pending transaction'
     attempts=0
-    while [ -d /var/lock/router-config.lock ] && [ "$attempts" -lt 180 ]; do
+    while [ "$attempts" -lt 900 ]; do
         attempts=$((attempts + 1))
         [ -f "$pending" ] || fail 'pending transaction disappeared before confirmation'
         kill -0 "$setup_pid" 2>/dev/null || {
             wait "$setup_pid" || :
             fail 'setup exited before releasing the transaction lock'
         }
+        if [ ! -d /var/lock/router-config.lock ] &&
+            grep -q 'candidate applied; confirm' /tmp/setup.log 2>/dev/null; then
+            break
+        fi
         sleep 1
     done
     [ ! -d /var/lock/router-config.lock ] || fail 'setup did not release the transaction lock'
+    grep -q 'candidate applied; confirm' /tmp/setup.log 2>/dev/null ||
+        fail 'setup did not report that the candidate was applied'
     transaction=${pending%/pending}
     transaction=${transaction##*/}
     [ -f "$pending" ] || fail 'pending transaction disappeared before confirmation'

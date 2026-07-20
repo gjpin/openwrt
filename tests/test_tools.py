@@ -91,7 +91,9 @@ def test_vm_guest_repeats_failure_reason_after_verbose_diagnostics():
     assert fail_body.count("printf 'vm-test: %s\\n'") == 2
     assert fail_body.rindex("printf 'vm-test: %s\\n'") > fail_body.index("logread")
     assert "tail -n 200 /tmp/setup.log" in fail_body
-    assert fail_body.index("tail -n 200 /tmp/setup.log") > fail_body.index("logread")
+    # Lock/setup diagnostics come before noisy logread so CI tails still show them.
+    assert fail_body.index("--- transaction lock ---") < fail_body.index("tail -n 200 /tmp/setup.log")
+    assert fail_body.index("tail -n 200 /tmp/setup.log") < fail_body.index("logread")
 
 
 def test_vm_guest_reports_redacted_idempotence_diff_after_verbose_diagnostics():
@@ -122,8 +124,11 @@ def test_vm_guest_waits_for_apply_to_release_lock_before_confirming():
     helper = source[helper_start : source.index("\n}", helper_start)]
     pending = helper.index("setup did not create a pending transaction")
     unlocked = helper.index("[ ! -d /var/lock/router-config.lock ]")
+    applied = helper.index("candidate applied; confirm")
     confirm = helper.index('/usr/libexec/router-config confirm "$transaction"')
     assert pending < unlocked < confirm
+    assert pending < applied < confirm
+    assert "900" in helper
 
 
 def test_vm_guest_checks_doh_listeners_across_rollback_phases():
