@@ -2,98 +2,161 @@
 
 ## Purpose
 
-This repository stores a device-specific OpenWrt configuration and a provisioning
-script. Treat changes as router infrastructure changes: a bad network, firewall,
-or wireless file can disconnect the router and require local recovery.
+This repository stores a device-specific OpenWrt configuration and a
+provisioning flow for a GL.iNet GL-MT6000 on upstream OpenWrt 25.12. Treat
+changes as router infrastructure: a bad network, firewall, or wireless
+candidate can disconnect the router and require local recovery.
 
 ## Repository map
 
-- `setup.sh` installs packages and applies encrypted DNS, ad blocking, firewall, and
-  WireGuard settings on an OpenWrt router.
-- `uci/` contains feature-oriented UCI batch overlays for network, firewall,
-  wireless, DNS, adblock-fast, and WireGuard configuration.
-- `uci/dns-over-https` contains the managed `https-dns-proxy` instances and
-  coordinated dnsmasq settings.
+- `setup.sh` is the router entrypoint. It validates secrets and the repository,
+  rejects unsupported stock bases, installs packages, then runs a confirmed
+  UCI transaction. It requires `--recovery-ready` and must run only on the
+  target router as root.
+- `router-config.sh` is the transaction manager: `check-base`, `prepare`,
+  `apply`, `confirm`, and `rollback`. At prepare time it installs itself to
+  `/usr/libexec/router-config` plus an early-boot rollback init script.
+- `router-config-rollback.init` becomes `/etc/init.d/router-config-rollback`
+  (`START=05`) and restores any still-pending transaction before normal
+  networking starts.
+- `modules/` holds internal shell modules sourced by `setup.sh` or
+  `router-config.sh`. They are not standalone commands. Fixed order matters:
+  base packages (setup only), then during prepare staging: network, firewall,
+  wireless, dns-over-https, adblock-fast, wireguard. Package install callbacks
+  for DNS, adblock, and WireGuard run from `setup.sh` before prepare.
+- `uci/` holds feature-oriented UCI batch overlays applied onto a copy of the
+  live config inside a candidate directory. They are not full replacements for
+  `/etc/config/*`.
+- `docs/` documents each module. Prefer those docs over inventing behavior.
+- `tests/` and `tools/` provide simulated-router Python tests, a pinned QEMU
+  OpenWrt VM suite, and an ImageBuilder flash/package gate. CI lives in
+  `.github/workflows/test.yml`.
+
+## Transaction model
+
+UCI changes are built and applied as one candidate:
+
+1. `prepare --recovery-ready` copies live UCI into
+   `/root/router-config-backups/<id>/backup` and `candidate`, applies overlays
+   to the candidate only, injects secrets into the mode-0600 candidate,
+   validates, writes `manifest.sha256`, and installs runtime helpers.
+2. `apply <id>` verifies the manifest, marks the transaction pending, installs
+   the candidate into `/etc/config`, runs `fw4 check`, reloads services, starts
+   a five-minute watchdog, and waits for confirmation.
+3. `confirm <id>` from a second local/recovery-capable session clears pending
+   and keeps the change. Without confirmation, the watchdog restores the
+   backup. A reboot with a pending file triggers early-boot recovery.
+
+Package installation and init-service enablement happen before the protected
+transaction and are not removed by rollback. Prefer this prepare/apply/confirm
+path over direct remote replacement of live config files.
 
 ## Environment and execution safety
 
-- Repository checks run in the development container, but `setup.sh` must run
-  only on the intended OpenWrt router as root. Never execute it in this workspace.
-- Do not assume the container has OpenWrt tools such as `uci`, `apk`, `fw4`, or
-  `/etc/init.d/*`. State clearly when validation must be completed on a router.
-- Do not install missing tools into the development container. Use the available
-  static checks and report any device-only validation that remains.
-- Before changing `/etc/config/network`, `/etc/config/firewall`, or wireless
-  settings on a router, require a backup and a recovery path through a local
-  Ethernet or serial connection. Prefer staged files and rollback-capable apply
-  procedures over direct remote replacement.
-- Never run deployment commands against a router unless the user explicitly asks
-  for deployment and identifies the target.
+- Never run `setup.sh` or `router-config.sh` against a real router from this
+  workspace unless the user explicitly asks for deployment and names the
+  target. Never run them as a workstation install.
+- Do not assume the development environment has OpenWrt tools such as `uci`,
+  `apk`, `fw4`, or `/etc/init.d/*`. Use the repository test harnesses and
+  static checks here; state clearly when validation must finish on a router or
+  in the QEMU suite.
+- Do not install missing OpenWrt tools into the development environment to make
+  scripts “run locally.”
+- Before any router deployment, require an off-router `sysupgrade -b` backup and
+  a verified local Ethernet or serial recovery path. Setup refuses to start
+  without `--recovery-ready`.
+- Deployment currently downloads the mutable GitHub `main` source archive.
+  There are no generated release artifacts. Call out that lack of pin when
+  changing deploy docs or install steps. Prefer reviewed pins for any new
+  remote installer.
 
 ## Configuration invariants
 
-- Keep network names aligned across the UCI feature overlays. Current VLAN interfaces
-  are `pixel`, `pixelthings`, `pixelguest`, and `pixeliot`.
-- Keep VLAN IDs, bridge devices, subnets, wireless `network` values, firewall
-  zones, and forwarding endpoints consistent as one change.
-- Every VLAN must have an explicit DHCP decision. The managed pools are declared
-  in `uci/network`; preserve their named sections and documented ranges.
-- Preserve the isolation policy documented in `uci/firewall`:
-  Pixel can reach WAN and the other VLANs; Guest and Things can reach WAN
-  but not other VLANs; IoT has no WAN forwarding. All restricted VLANs need only
-  the explicitly allowed router services such as DNS and DHCP.
-- Account for the target device's existing base configuration. The checked-in
-  `network` file has no loopback, globals, WAN, or WAN6 sections, and the checked-in
-  `firewall` file has no defaults or WAN zone. Do not present these files as safe
-  full replacements unless those required sections are intentionally added and
-  verified for the exact router model and OpenWrt release.
-- Hardware port and radio names (`lan1` through `lan4`, `br-lan`, and `radio0`)
-  are device-specific. Do not generalize them without target hardware evidence.
-- Do not commit real Wi-Fi passwords, WireGuard private or preshared keys, tokens,
-  or other secrets. Keep placeholders in tracked files and inject secrets only at
-  deployment time. Avoid printing secret-bearing files or environment variables.
-- Shell variables are not expanded merely by copying a UCI file. If templates are
-  used, render them explicitly and verify that no literal `${...}` placeholder or
-  extra quote remains before installation.
+- Keep network names aligned across overlays and modules. Current VLAN
+  interfaces are `pixel`, `pixelguest`, `pixeliot`, and `pixelthings`.
+- Keep VLAN IDs, bridge-VLAN ports, subnets, wireless `network` values,
+  firewall zones, forwarding, and DNS divert rules consistent as one change.
+- Every VLAN must have an explicit DHCP decision. Managed pools live in
+  `uci/network`; preserve named sections and documented ranges.
+- Preserve the isolation policy in `uci/firewall` / `docs/firewall.md`: Pixel
+  can reach WAN and the other VLANs; Guest and Things can reach WAN but not
+  other VLANs; IoT has no WAN forwarding and rejects general zone output.
+  Restricted VLANs allow only explicitly permitted router services (DNS/DHCP),
+  plus the IoT DHCP-reply exception.
+- WAN and managed VLANs are IPv4-only. Do not reintroduce IPv6 delegation, RA,
+  DHCPv6, NDP, `wan6`, or ULA unless that is an intentional, tested change.
+- Overlays update an existing stock configuration. Checked-in `uci/network` has
+  no loopback, globals, or WAN sections; checked-in `uci/firewall` has no
+  defaults or WAN zone. Do not present overlays as safe full replacements.
+- Target hardware expectations are device-specific: DSA ports `lan1` through
+  `lan5`, `br-lan`, and exactly one `2g` plus one `5g` `wifi-device`. Do not
+  generalize without target evidence. Preflight rejects customized or ambiguous
+  stock base sections rather than guessing.
+- Do not commit real Wi-Fi passwords, WireGuard private or preshared keys,
+  tokens, or other secrets. Keep placeholders in tracked templates; inject
+  secrets only into the candidate at prepare time. Never print secret-bearing
+  values, files, or environment variables.
+- Shell variables are not expanded by copying a UCI file. WireGuard rendering
+  must happen explicitly; reject any leftover `${...}` placeholder before
+  install.
 - Keep dnsmasq's upstream list identical to the named `https-dns-proxy` listen
-  ports, and verify that the two daemons do not contend for the same ports.
+  ports, and keep the two daemons from contending for the same ports.
+  `https-dns-proxy` must not mutate dnsmasq or firewall outside the
+  transaction (`dnsmasq_config_update='-'`, `force_dns='0'`, `notrack_dns='0'`).
 
-## Editing `setup.sh`
+## Editing shell and modules
 
-- Write portable POSIX `sh` compatible with OpenWrt BusyBox `ash`; do not add Bash
-  syntax.
-- Add or retain a `#!/bin/sh` shebang. Quote expansions unless intentional word
-  splitting is documented.
-- Validate every required variable before the first mutation. The WireGuard block
-  depends on `VPN_IF`, `VPN_PORT`, `VPN_KEY`, `VPN_ADDR`, `VPN_ADDR6`, `VPN_PUB`,
-  and `VPN_PSK`; Wi-Fi rendering depends on the four password variables.
-- Keep operations idempotent. Re-running the script must not append duplicate UCI
-  rules, redirects, list entries, or sections.
-- Resolve companion files relative to `setup.sh`, and reject a missing or empty
-  repository file before the first router mutation.
-- Deployment uses the current GitHub `main` source archive directly; there are no
-  generated release artifacts to rebuild or publish after changing an overlay.
-- Avoid unpinned remote installer execution. If an upstream installer must be
-  used, pin a reviewed version or commit and document its provenance/checksum.
-- Group related UCI mutations, commit once per package, and reload services only
-  after successful validation. Preserve a rollback path for network and firewall
-  changes.
-- Address named UCI sections directly. Do not rename anonymous sections by index;
-  section ordering is device- and configuration-dependent.
+- Write portable POSIX `sh` for OpenWrt BusyBox `ash`; no Bash syntax.
+- Keep `#!/bin/sh` shebangs. Quote expansions unless intentional word splitting
+  is documented (and shellcheck-justified).
+- Validate every required variable before the first router mutation. Required
+  secrets/settings are `PIXEL_WIFI_PASSWORD`, `THINGS_WIFI_PASSWORD`,
+  `GUEST_WIFI_PASSWORD`, `IOT_WIFI_PASSWORD`, `VPN_IF`, `VPN_PORT`, `VPN_KEY`,
+  `VPN_ADDR`, `VPN_PUB`, and `VPN_PSK`. There is no `VPN_ADDR6`.
+- Keep operations idempotent. Re-running prepare/apply must not append
+  duplicate UCI rules, redirects, list entries, or sections.
+- Resolve companion files relative to the script directory, and reject a
+  missing or empty repository file before the first mutation.
+- Address named UCI sections directly. Do not rename anonymous stock sections
+  by index on the live router; naming happens only inside the candidate when
+  content uniquely identifies a stock role.
+- Group related candidate mutations per module, validate before apply, and
+  reload services only after a successful candidate install and `fw4 check`.
 
 ## Validation
 
-Run the checks relevant to the files changed:
+Run the checks relevant to the files changed.
+
+Static shell and tree checks:
 
 ```sh
-sh -n setup.sh
-shellcheck -s sh setup.sh
-shfmt -d -i 4 -ci setup.sh
+sh -n setup.sh router-config.sh router-config-rollback.init modules/*.sh tools/vm/*.sh
+shellcheck -s sh setup.sh router-config.sh router-config-rollback.init modules/*.sh tools/vm/*.sh
+shfmt -d -i 4 -ci setup.sh router-config.sh router-config-rollback.init modules/*.sh tools/vm/*.sh
 git diff --check
 ```
 
-On a disposable router or matching OpenWrt test target, validate staged UCI files
-before replacing live configuration. After applying, inspect at least:
+Simulated-router integration tests (no real router):
+
+```sh
+python tools/run-tests.py
+```
+
+Pinned QEMU acceptance suite (OpenWrt userland, UCI, fw4, services, VLAN
+clients, DNS, WireGuard, idempotency, rollback). Does not emulate switch ASICs,
+RF, or eMMC recovery:
+
+```sh
+python3 tools/run-vm-tests.py --profile stable
+```
+
+Exact target ImageBuilder package/flash-fit gate (Linux x86_64 CI/host):
+
+```sh
+python3 tools/check-imagebuilder.py
+```
+
+On a disposable router or after a real apply, inspect at least:
 
 ```sh
 uci show network
@@ -105,12 +168,13 @@ logread -e netifd -e firewall -e https-dns-proxy
 ```
 
 Confirm from a client in each VLAN that DHCP and DNS work, expected internet
-access works, forbidden inter-VLAN routes remain blocked, and the management VLAN
-can still reach the router. Verify WireGuard handshake and routing separately.
-If a command is unavailable on the target OpenWrt release, report that fact and
-use the release-appropriate equivalent rather than silently skipping the check.
+access works, forbidden inter-VLAN routes remain blocked, and the management
+VLAN can still reach the router. Verify WireGuard handshake and routing
+separately. If a command is unavailable on the target OpenWrt release, report
+that and use the release-appropriate equivalent rather than skipping silently.
 
 ## Change scope
 
-- In the final report, list files changed, static checks run, checks that require
-  real router hardware, and any lockout, secret-handling, or compatibility risk.
+In the final report, list files changed, static checks and automated suites
+run, checks that still require real router hardware, and any lockout,
+secret-handling, package-vs-UCI rollback, or compatibility risk.
