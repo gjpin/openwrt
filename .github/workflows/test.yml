@@ -1,8 +1,6 @@
 name: router tests
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -29,7 +27,6 @@ jobs:
           git diff --check
 
   stable-vm:
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
@@ -47,7 +44,6 @@ jobs:
       - run: python tools/run-vm-tests.py --profile stable
 
   exact-target:
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
@@ -65,7 +61,6 @@ jobs:
       - run: python tools/check-imagebuilder.py
 
   live-vm:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:

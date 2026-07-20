@@ -231,6 +231,10 @@ def test_imagebuilder_gate_matches_every_installer_package():
 
 def test_ci_uses_vm_and_native_imagebuilder_without_container_engines():
     workflow = (REPO / ".github/workflows/test.yml").read_text()
+    assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
+    assert "pull_request:" not in workflow
+    assert "schedule:" not in workflow
     assert "run-vm-tests.py --profile stable" in workflow
     assert "run-vm-tests.py --profile live" in workflow
     assert "check-imagebuilder.py" in workflow

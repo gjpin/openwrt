@@ -130,8 +130,8 @@ python3 tools/run-vm-tests.py --profile stable
 
 Use `--keep-workdir` to retain the disposable disk and redacted serial log after
 a run. `--profile live` additionally checks every external DoH provider and
-blocklist URL; it is intended for the nightly CI job. On Linux x86_64, the exact
-target package/flash-fit gate is:
+blocklist URL; run it from the manual CI workflow when needed. On Linux x86_64,
+the exact target package/flash-fit gate is:
 
 ```sh
 python3 tools/check-imagebuilder.py
