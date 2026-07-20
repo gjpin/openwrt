@@ -403,9 +403,23 @@ if [ "$profile" = live ]; then
         dig +time=10 +tries=1 @127.0.0.1 -p "$port" openwrt.org A | grep -q 'status: NOERROR' ||
             fail "live DoH query failed on $port"
     done
-    uci show adblock-fast | sed -n "s/.*\.url='\(.*\)'/\1/p" | while IFS= read -r url; do
-        uclient-fetch "$url" -O /dev/null || fail "blocklist unavailable: $url"
-    done
+    # Do not re-download multi-megabyte blocklists here. Setup already fetched
+    # them, and once dnsmasq.servers is active a source host that appears in any
+    # list (or a slow QEMU user-net transfer) makes uclient-fetch fail spuriously.
+    [ -s /var/run/adblock-fast/dnsmasq.servers ] ||
+        fail 'adblock-fast dnsmasq.servers missing after live setup'
+    blocklist_lines=$(wc -l </var/run/adblock-fast/dnsmasq.servers)
+    [ "$blocklist_lines" -gt 1000 ] ||
+        fail "adblock-fast dnsmasq.servers too small: $blocklist_lines lines"
+    uci show adblock-fast | sed -n "s/.*\.url='\(.*\)'/\1/p" >/tmp/vm-test-blocklist-urls
+    [ -s /tmp/vm-test-blocklist-urls ] || fail 'no adblock-fast source URLs configured'
+    while IFS= read -r url; do
+        [ -n "$url" ] || continue
+        case "$url" in
+            https://* | http://*) ;;
+            *) fail "adblock-fast source is not an http(s) URL: $url" ;;
+        esac
+    done </tmp/vm-test-blocklist-urls
 fi
 
 # Associate one isolated WPA3-SAE hwsim station with each managed SSID and
@@ -589,15 +603,44 @@ if [ "$vm_wan_ready" != 1 ]; then
     cp /tmp/vm-test-wan-status /tmp/vm-test-failure-detail 2>/dev/null || :
     fail 'static VM WAN did not become ready'
 fi
-for namespace in pixel1 guest things; do
-    ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2 >/dev/null || fail "$namespace cannot reach WAN"
-done
-! ip netns exec iot ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1 || fail 'IoT reached WAN'
-# Reload only after netifd has published the replacement WAN and the connectivity
-# probes have allowed its asynchronous firewall hotplug event to finish. Reloading
-# immediately after network restart can replace nftables counters during the DoT
-# assertion below.
+# netifd marks WAN up before fw4 has retargeted masquerade onto vmwan. Reload
+# once the replacement WAN is published, then retry LAN->WAN probes before any
+# DoT counter snapshot so nftables is stable for the assertion below.
 /etc/init.d/firewall reload || fail 'firewall reload failed after static VM WAN activation'
+wan_probe_ready=0
+wan_probe_attempt=0
+wan_probe_failed=
+while [ "$wan_probe_attempt" -lt 30 ]; do
+    wan_probe_attempt=$((wan_probe_attempt + 1))
+    wan_probe_ready=1
+    wan_probe_failed=
+    for namespace in pixel1 guest things; do
+        if ! ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1; then
+            wan_probe_ready=0
+            wan_probe_failed=$namespace
+            break
+        fi
+    done
+    [ "$wan_probe_ready" = 1 ] && break
+    sleep 1
+done
+if [ "$wan_probe_ready" != 1 ]; then
+    {
+        printf 'WAN probes failed after %s attempts (first failure: %s)\n' \
+            "$wan_probe_attempt" "${wan_probe_failed:-unknown}"
+        printf '%s\n' '--- WAN status ---'
+        ifstatus wan || :
+        printf '%s\n' '--- client routes ---'
+        for namespace in pixel1 guest things; do
+            printf 'namespace %s:\n' "$namespace"
+            ip -n "$namespace" route || :
+        done
+        printf '%s\n' '--- nft masq / wan ---'
+        nft list ruleset | sed -n '/masq\|vmwan\|oifname/p' || :
+    } >/tmp/vm-test-failure-detail 2>&1 || :
+    fail "$wan_probe_failed cannot reach WAN"
+fi
+! ip netns exec iot ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1 || fail 'IoT reached WAN'
 dot_before=$(nft list ruleset | sed -n '/PixelGuest-Reject-DoT/s/.*counter packets \([0-9][0-9]*\).*/\1/p' | head -n 1)
 [ -n "$dot_before" ] || fail 'DoT rule has no nftables counter'
 # bind-dig is installed above and +tcp guarantees a TCP connection attempt.

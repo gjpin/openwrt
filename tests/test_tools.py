@@ -190,22 +190,42 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
         "/etc/init.d/network restart || fail 'failed to restart network for static VM WAN'"
     )
     wan_ready = source.index('grep -q \'"l3_device": "vmwan"\'', network_restart)
-    connectivity_probe = source.index(
-        'ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2', wan_ready
-    )
     firewall_reload = source.index(
         "/etc/init.d/firewall reload || fail "
         "'firewall reload failed after static VM WAN activation'",
-        connectivity_probe,
+        wan_ready,
     )
+    connectivity_probe = source.index(
+        'ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2', firewall_reload
+    )
+    probe_retry = source.index('while [ "$wan_probe_attempt" -lt 30 ]; do', firewall_reload)
     dot_probe = source.index(
-        "ip netns exec guest dig +tcp +time=1 +tries=1", firewall_reload
+        "ip netns exec guest dig +tcp +time=1 +tries=1", connectivity_probe
     )
-    assert network_restart < wan_ready < connectivity_probe < firewall_reload < dot_probe
+    assert (
+        network_restart
+        < wan_ready
+        < firewall_reload
+        < probe_retry
+        < connectivity_probe
+        < dot_probe
+    )
     assert "ip netns exec guest busybox nc" not in source
     assert "PixelGuest-Reject-DoT packets before:" in source
     assert "PixelGuest-Reject-DoT packets after:" in source
     assert "--- DoT probe output ---" in source
+
+
+def test_vm_guest_live_blocklist_check_avoids_full_redownload():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    live_start = source.index('if [ "$profile" = live ]; then')
+    live = source[live_start : source.index("\nfi\n", live_start)]
+    assert "/var/run/adblock-fast/dnsmasq.servers" in live
+    assert "adblock-fast dnsmasq.servers missing after live setup" in live
+    assert "adblock-fast dnsmasq.servers too small:" in live
+    assert "uclient-fetch \"$url\" -O /dev/null" not in live
+    assert "blocklist unavailable:" not in live
+    assert "/tmp/vm-test-blocklist-urls" in live
 
 
 def test_vm_guest_uses_diagnostics_for_pre_confirmation_failures():
