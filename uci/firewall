@@ -78,3 +78,14 @@ set firewall.pixeliot_services.src='pixeliot'
 set firewall.pixeliot_services.dest_port='53 67 68'
 set firewall.pixeliot_services.proto='tcp udp'
 set firewall.pixeliot_services.target='ACCEPT'
+
+# IoT rejects general router-originated output, so permit only DHCPv4 replies.
+delete firewall.pixeliot_dhcp_reply
+set firewall.pixeliot_dhcp_reply='rule'
+set firewall.pixeliot_dhcp_reply.name='PixelIoT-DHCP-Reply'
+set firewall.pixeliot_dhcp_reply.dest='pixeliot'
+set firewall.pixeliot_dhcp_reply.src_port='67'
+set firewall.pixeliot_dhcp_reply.dest_port='68'
+set firewall.pixeliot_dhcp_reply.proto='udp'
+set firewall.pixeliot_dhcp_reply.family='ipv4'
+set firewall.pixeliot_dhcp_reply.target='ACCEPT'

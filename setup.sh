@@ -100,6 +100,10 @@ validate_repository
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
 export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK
 
+# Reject unsupported or ambiguous stock configuration before package
+# installation or init-service enablement performs the first router mutation.
+"$SCRIPT_DIR/router-config.sh" check-base
+
 # Modules are internal sourced files. Their fixed order is part of the setup
 # contract and is deliberately not user-selectable.
 # shellcheck source=/dev/null

@@ -18,14 +18,15 @@ and IPv6 is disabled on WAN.
 
 ## Ethernet layout
 
-VLAN 1 is untagged and primary on `lan1` through `lan4`. VLANs 2, 3, and 4 are
+VLAN 1 is untagged and primary on `lan1` through `lan5`. VLANs 2, 3, and 4 are
 tagged on `lan1`, making it a mixed Pixel access port and trunk. They are not
-carried on `lan2` through `lan4`.
+carried on `lan2` through `lan5`.
 
 The module preserves the router's base network sections and refuses to proceed
-unless loopback, globals, WAN, `br_lan`, and the four expected DSA ports exist.
-The fresh base must not contain a `wan6` interface or ULA prefix. The overlay
-updates an existing configuration; it is not a complete replacement for
-`/etc/config/network` or `/etc/config/dhcp`.
+unless loopback, globals, WAN, `br_lan`, and the five expected DSA ports exist.
+A recognized fresh stock `lan` interface, DHCP pool, `wan6`, and ULA prefix are
+removed transaction-locally. Customized stock LAN settings are rejected rather
+than guessed. The overlay updates an existing configuration; it is not a
+complete replacement for `/etc/config/network` or `/etc/config/dhcp`.
 
 [Back to the README](../README.md)

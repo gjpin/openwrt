@@ -15,8 +15,8 @@ then makes these coordinated configuration changes:
 - WAN stops accepting peer-provided DNS servers.
 - The system NTP server list is replaced with fixed IP addresses so time can be
   established without depending on DNS.
-- Firewall rules DNAT WAN port 53 to LAN port 53, DNAT LAN port 5353 to port 53,
-  and reject LAN-to-WAN DNS-over-TLS on TCP port 853.
+- Explicit rules for `pixel`, `pixelguest`, `pixelthings`, and `pixeliot`
+  intercept TCP/UDP port 53 and reject direct TCP/UDP DNS-over-TLS on port 853.
 
 Candidate validation requires exactly the four named proxy instances, their
 expected URLs, unique ports, bootstrap values, and matching dnsmasq forwards.

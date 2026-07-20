@@ -29,7 +29,7 @@ dns_over_https_validate() {
         die 'https-dns-proxy must not update firewall tracking outside the transaction'
 
     proxy_sections=$(uci -q -c "$candidate_dir" show https-dns-proxy |
-        grep "='https-dns-proxy'\$" | sed "s/^https-dns-proxy\.//; s/='https-dns-proxy'\$//" |
+        sed -n "s/^https-dns-proxy\.\([^=]*\)=https-dns-proxy$/\1/p" |
         sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     [ "$proxy_sections" = 'cloudflare_security control_d_ads_tracking mullvad_base quad9' ] ||
         die 'https-dns-proxy candidate must contain exactly the four named providers'

@@ -18,12 +18,13 @@ confirmed within five minutes.
 
 ## Compatibility and safety
 
-This configuration supports fresh OpenWrt 25.12 or newer installations using
-official `apk` feeds and at least 256 MB RAM. It is specific to hardware with
-one `2g` and one `5g` wifi-device, `br-lan`, and DSA ports `lan1` through `lan4`.
-The existing router must
-also have its standard loopback, globals, IPv4 WAN, firewall defaults, WAN zone,
-and a single dnsmasq section. It must not define a `wan6` interface or ULA prefix.
+This configuration supports a fresh upstream OpenWrt 25.12 installation on the
+GL.iNet GL-MT6000 using official `apk` feeds and at least 256 MB RAM. It expects
+one `2g` and one `5g` wifi-device, `br-lan`, and DSA ports `lan1` through `lan5`.
+The installer recognizes the unique stock anonymous `br-lan` device, firewall
+defaults, LAN and WAN zones, LAN-to-WAN forwarding, `lan`/`wan6` interfaces, LAN
+DHCP pool, and ULA prefix by content. It removes obsolete base items only in the candidate.
+Ambiguous or customized base sections are rejected before package installation.
 
 Do not run this on a router with a different port or radio layout. Applying the
 network, firewall, and wireless changes can disconnect every remote session.
@@ -116,6 +117,37 @@ python tools/run-tests.py
 Use `--workers 1` for a serial run or `--workers N` to select another level of
 concurrency. Each test uses its own simulated router filesystem; these tests do
 not apply configuration to a router.
+
+The full stable suite boots the SHA-256-pinned official OpenWrt 25.12.4 AArch64
+kernel and ext4 rootfs in QEMU. Downloads are cached in `.cache/openwrt-vm` and
+verified on every run. On Apple Silicon macOS:
+
+```sh
+cd /path/to/openwrt
+brew install qemu
+python3 tools/run-vm-tests.py --profile stable
+```
+
+Use `--keep-workdir` to retain the disposable disk and redacted serial log after
+a run. `--profile live` additionally checks every external DoH provider and
+blocklist URL; it is intended for the nightly CI job. On Linux x86_64, the exact
+target package/flash-fit gate is:
+
+```sh
+python3 tools/check-imagebuilder.py
+```
+
+That command uses the pinned official `mediatek/filogic` ImageBuilder with
+`PROFILE=glinet_gl-mt6000`, verifies factory and sysupgrade images plus their
+package manifest, and discards all generated firmware. Nothing produced by the
+test harness is a deployment artifact.
+
+QEMU exercises OpenWrt userland, real UCI serialization, fw4, procd services,
+namespaced VLAN clients, DNS interception, WireGuard, idempotency, and rollback.
+It cannot emulate the MT7986/MT7531 switch, MT7915 RF behavior, 2.5 GbE PHYs,
+bootloader, or eMMC recovery. Physical deployment therefore still requires an
+off-router backup, local Ethernet or serial recovery, and real port, Wi-Fi,
+reboot, WireGuard, DNS, and rollback acceptance tests.
 
 ## Module reference
 

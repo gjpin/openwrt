@@ -20,9 +20,7 @@ wireless_module_preflight() {
     WIRELESS_2G_DEVICE=
     WIRELESS_5G_DEVICE=
     wifi_devices=$(uci -q -c "$CONFIG_DIR" show wireless |
-        sed -n \
-            -e "s/^wireless\.\([^.]*\)='wifi-device'$/\1/p" \
-            -e "s/^wireless\.\([^.]*\)=wifi-device$/\1/p")
+        sed -n "s/^wireless\.\([^.]*\)=wifi-device$/\1/p")
     # Intentional splitting: UCI section names cannot contain whitespace.
     # shellcheck disable=SC2086
     for section_name in $wifi_devices; do

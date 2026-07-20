@@ -1,2 +1,6 @@
 .pytest_cache
 __pycache__
+.cache/
+openwrt-vm-live.log
+openwrt-vm-stable.log
+tests/.router-*

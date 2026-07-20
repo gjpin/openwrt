@@ -2,15 +2,21 @@
 # This is applied to an existing OpenWrt configuration, not installed directly.
 
 set network.wan.ipv6='0'
+delete network.wan6
+delete network.globals.ula_prefix
+delete network.lan
+delete dhcp.lan
 
 del_list network.br_lan.ports='lan1'
 del_list network.br_lan.ports='lan2'
 del_list network.br_lan.ports='lan3'
 del_list network.br_lan.ports='lan4'
+del_list network.br_lan.ports='lan5'
 add_list network.br_lan.ports='lan1'
 add_list network.br_lan.ports='lan2'
 add_list network.br_lan.ports='lan3'
 add_list network.br_lan.ports='lan4'
+add_list network.br_lan.ports='lan5'
 
 delete network.pixel_vlan
 set network.pixel_vlan='bridge-vlan'
@@ -20,6 +26,7 @@ add_list network.pixel_vlan.ports='lan1:u*'
 add_list network.pixel_vlan.ports='lan2:u*'
 add_list network.pixel_vlan.ports='lan3:u*'
 add_list network.pixel_vlan.ports='lan4:u*'
+add_list network.pixel_vlan.ports='lan5:u*'
 
 delete network.pixelthings_vlan
 set network.pixelthings_vlan='bridge-vlan'

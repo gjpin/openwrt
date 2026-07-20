@@ -1,0 +1,81 @@
+name: router tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install static-check tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck shfmt
+      - name: Run fast and static checks
+        run: |
+          python tools/run-tests.py
+          sh -n setup.sh router-config.sh router-config-rollback.init modules/*.sh tools/vm/*.sh
+          shellcheck -s sh setup.sh router-config.sh router-config-rollback.init modules/*.sh tools/vm/*.sh
+          shfmt -d -i 4 -ci setup.sh router-config.sh router-config-rollback.init modules/*.sh tools/vm/*.sh
+          git diff --check
+
+  stable-vm:
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install AArch64 VM tools
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-arm
+      - name: Cache verified OpenWrt inputs
+        uses: actions/cache@v4
+        with:
+          path: .cache/openwrt-vm
+          key: openwrt-vm-25.12.4
+      - run: python tools/run-vm-tests.py --profile stable
+
+  exact-target:
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install native ImageBuilder tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential zstd
+      - name: Cache verified ImageBuilder
+        uses: actions/cache@v4
+        with:
+          path: .cache/openwrt-vm
+          key: openwrt-imagebuilder-25.12.4-mediatek-filogic
+      - run: python tools/check-imagebuilder.py
+
+  live-vm:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install AArch64 VM tools
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-arm
+      - name: Cache verified OpenWrt inputs
+        uses: actions/cache@v4
+        with:
+          path: .cache/openwrt-vm
+          key: openwrt-vm-25.12.4
+      - run: python tools/run-vm-tests.py --profile live

@@ -115,6 +115,17 @@ if command == "import":
     save(package, data)
     sys.exit(0)
 if command == "commit": sys.exit(0)
+if command == "rename":
+    expression = args[0]
+    target, new_name = expression.split("=", 1)
+    package, section, option = split_target(target)
+    if option is not None: sys.exit(2)
+    data = load(package)
+    if section not in data or new_name in data: sys.exit(1)
+    renamed = {}
+    for name, value in data.items():
+        renamed[new_name if name == section else name] = value
+    save(package, renamed); sys.exit(0)
 if command in ("set", "add_list", "del_list", "delete"):
     sys.exit(mutate([command, args[0]]))
 target = args[0]
@@ -122,7 +133,8 @@ if command == "show" and "." not in target:
     package = target
     data = load(package)
     for name, section_data in data.items():
-        print(f"{package}.{name}='{section_data['.type']}'")
+        section_type = section_data['.type']
+        print(f"{package}.{name}={section_type}")
         for key, value in section_data.items():
             if key == ".type": continue
             values = value if isinstance(value, list) else [value]
@@ -156,13 +168,20 @@ def router():
     config = tmp_path / "config"
     bin_dir = tmp_path / "bin"
     sys_net = tmp_path / "sys" / "class" / "net"
+    proc_net = tmp_path / "proc" / "net"
     backups = tmp_path / "backups"
     runtime = tmp_path / "libexec" / "router-config"
     init = tmp_path / "init.d" / "router-config-rollback"
     overlays = tmp_path / "overlays"
     modules = tmp_path / "modules"
-    config.mkdir(); bin_dir.mkdir(); overlays.mkdir(); modules.mkdir()
-    for name in ("br-lan", "lan1", "lan2", "lan3", "lan4"):
+    config.mkdir(); bin_dir.mkdir(); overlays.mkdir(); modules.mkdir(); proc_net.mkdir(parents=True)
+    socket_lines = "".join(
+        f"   {index}: 0100007F:{port:04X} 00000000:0000 0A\n"
+        for index, port in enumerate((5053, 5054, 5055, 5056, 5999))
+    )
+    (proc_net / "tcp").write_text(socket_lines)
+    (proc_net / "udp").write_text("")
+    for name in ("br-lan", "lan1", "lan2", "lan3", "lan4", "lan5"):
         (sys_net / name).mkdir(parents=True)
     for name in ("network", "firewall", "wireless", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "uci" / name, overlays / name)
@@ -173,12 +192,12 @@ def router():
         "loopback": {".type": "interface", "proto": "static"},
         "globals": {".type": "globals"},
         "wan": {".type": "interface", "proto": "dhcp"},
-        "br_lan": {".type": "device", "name": "br-lan", "ports": ["lan1", "lan2", "lan3", "lan4"], "stp": "1"},
+        "br_lan": {".type": "device", "name": "br-lan", "type": "bridge", "ports": ["lan1", "lan2", "lan3", "lan4", "lan5"], "stp": "1"},
         "unrelated": {".type": "interface", "proto": "none"},
     }
     firewall = {
-        "defaults": {".type": "defaults", "input": "REJECT"},
-        "wan": {".type": "zone", "name": "wan", "network": ["wan"]},
+        "defaults": {".type": "defaults", "input": "REJECT", "output": "ACCEPT", "forward": "REJECT"},
+        "wan": {".type": "zone", "name": "wan", "network": ["wan"], "input": "REJECT", "output": "ACCEPT", "forward": "REJECT"},
         "unrelated": {".type": "rule", "name": "Keep me"},
     }
     wireless = {
@@ -212,6 +231,25 @@ exit 0
     write_executable(bin_dir / "fw4", "#!/bin/sh\n[ ! -e \"${FW4_FAIL_FILE:-/nonexistent}\" ]\n")
     service_source = '''#!/bin/sh
 service_name=${0##*/}
+if [ -e "${STOPPED_WITH_NONZERO_ONCE:-/nonexistent}" ] &&
+    [ "${1-}" = stop ] &&
+    [ "${STOP_FAIL_NAME:-}" = "$service_name" ]; then
+    rm -f "$STOPPED_WITH_NONZERO_ONCE"
+    cp "$ROUTER_CONFIG_PROC_NET_DIR/tcp" "$ROUTER_CONFIG_PROC_NET_DIR/tcp.before-stop"
+    : >"$ROUTER_CONFIG_PROC_NET_DIR/tcp"
+    exit 1
+fi
+if [ "${1-}" = restart ] &&
+    [ "${STOP_FAIL_NAME:-}" = "$service_name" ] &&
+    [ -f "$ROUTER_CONFIG_PROC_NET_DIR/tcp.before-stop" ]; then
+    mv "$ROUTER_CONFIG_PROC_NET_DIR/tcp.before-stop" "$ROUTER_CONFIG_PROC_NET_DIR/tcp"
+fi
+if [ -e "${STOP_FAIL_ONCE:-/nonexistent}" ] &&
+    [ "${1-}" = stop ] &&
+    [ "${STOP_FAIL_NAME:-}" = "$service_name" ]; then
+    rm -f "$STOP_FAIL_ONCE"
+    exit 1
+fi
 if [ -e "${SERVICE_FAIL_ONCE:-/nonexistent}" ] &&
     [ "${1-}" != stop ] &&
     { [ -z "${SERVICE_FAIL_NAME:-}" ] || [ "$SERVICE_FAIL_NAME" = "$service_name" ]; } &&
@@ -234,6 +272,7 @@ exit 0
         "ROUTER_CONFIG_BACKUP_DIR": str(backups),
         "ROUTER_CONFIG_LOCK_DIR": str(tmp_path / "lock"),
         "ROUTER_CONFIG_SYS_CLASS_NET": str(sys_net),
+        "ROUTER_CONFIG_PROC_NET_DIR": str(proc_net),
         "ROUTER_CONFIG_INIT_SCRIPT": str(init),
         "ROUTER_CONFIG_LIBEXEC": str(runtime),
         "ROUTER_CONFIG_UCI_DIR": str(overlays),
@@ -298,6 +337,12 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["pixelthings"]["device"] == "radio0"
     assert wireless["pixelguest"]["device"] == "radio0"
     assert wireless["pixeliot"]["device"] == "radio1"
+    firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
+    assert firewall["pixeliot_dhcp_reply"] == {
+        ".type": "rule", "name": "PixelIoT-DHCP-Reply", "dest": "pixeliot",
+        "src_port": "67", "dest_port": "68", "proto": "udp",
+        "family": "ipv4", "target": "ACCEPT",
+    }
     assert dhcp["unrelated"]["ignore"] == "1"
     assert dhcp["dnsmasq"]["server"] == [
         "127.0.0.1#5053", "127.0.0.1#5054", "127.0.0.1#5055", "127.0.0.1#5056",
@@ -370,6 +415,70 @@ def test_preflight_rejects_missing_hardware_without_backup(router):
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert result.returncode != 0
     assert "required DSA interface missing: lan4" in result.stderr
+    assert not backups.exists()
+
+
+def test_fresh_stock_base_is_normalized_in_candidate_only(router):
+    _, config, backups, _, env = router
+    network = json.loads((config / "network").read_text())
+    network["@device[0]"] = network.pop("br_lan")
+    network["globals"]["ula_prefix"] = "fd12:3456:789a::/48"
+    network["lan"] = {
+        ".type": "interface", "device": "br-lan", "proto": "static",
+        "ipaddr": ["192.168.1.1/24"], "ip6assign": "60",
+    }
+    network["wan6"] = {".type": "interface", "device": "@wan", "proto": "dhcpv6"}
+    (config / "network").write_text(json.dumps(network))
+    dhcp = json.loads((config / "dhcp").read_text())
+    dhcp["lan"] = {
+        ".type": "dhcp", "interface": "lan", "start": "100",
+        "limit": "150", "leasetime": "12h",
+    }
+    (config / "dhcp").write_text(json.dumps(dhcp))
+    firewall = {
+        "@defaults[0]": {
+            ".type": "defaults", "synflood_protect": "1", "input": "REJECT",
+            "output": "ACCEPT", "forward": "REJECT",
+        },
+        "@zone[0]": {
+            ".type": "zone", "name": "lan", "network": ["lan"],
+            "input": "ACCEPT", "output": "ACCEPT", "forward": "ACCEPT",
+        },
+        "@zone[1]": {
+            ".type": "zone", "name": "wan", "network": ["wan", "wan6"],
+            "input": "REJECT", "output": "ACCEPT", "forward": "REJECT",
+            "masq": "1", "mtu_fix": "1",
+        },
+        "@forwarding[0]": {".type": "forwarding", "src": "lan", "dest": "wan"},
+        "unrelated": {".type": "rule", "name": "Keep me"},
+    }
+    (config / "firewall").write_text(json.dumps(firewall))
+    originals = {name: (config / name).read_text() for name in ("network", "dhcp", "firewall")}
+
+    _, transaction = prepare(env)
+    candidate_network = json.loads((backups / transaction / "candidate" / "network").read_text())
+    candidate_dhcp = json.loads((backups / transaction / "candidate" / "dhcp").read_text())
+    candidate_firewall = json.loads((backups / transaction / "candidate" / "firewall").read_text())
+    assert "lan" not in candidate_network and "wan6" not in candidate_network
+    assert "@device[0]" not in candidate_network
+    assert candidate_network["br_lan"]["ports"] == ["lan1", "lan2", "lan3", "lan4", "lan5"]
+    assert "ula_prefix" not in candidate_network["globals"]
+    assert "lan" not in candidate_dhcp
+    assert candidate_firewall["defaults"][".type"] == "defaults"
+    assert candidate_firewall["wan"]["network"] == ["wan"]
+    assert "base_lan" not in candidate_firewall and "base_lan_wan" not in candidate_firewall
+    assert candidate_firewall["unrelated"]["name"] == "Keep me"
+    assert {name: (config / name).read_text() for name in originals} == originals
+
+
+def test_custom_stock_base_is_rejected_before_backup(router):
+    _, config, backups, _, env = router
+    firewall = json.loads((config / "firewall").read_text())
+    firewall["wan"]["network"] = ["wan", "custom_uplink"]
+    (config / "firewall").write_text(json.dumps(firewall))
+    result = run_router(env, "check-base", check=False)
+    assert result.returncode != 0
+    assert "customized network membership" in result.stderr
     assert not backups.exists()
 
 
@@ -477,7 +586,7 @@ def test_fw4_failure_does_not_change_live_configuration(router):
     assert (config / "network").read_text() == original
 
 
-def test_apply_fw4_and_reload_failures_restore_backup(router):
+def test_apply_fw4_failure_restores_backup(router):
     root, config, backups, _, env = router
     original = (config / "network").read_text()
     original_proxy = (config / "https-dns-proxy").read_text()
@@ -490,27 +599,84 @@ def test_apply_fw4_and_reload_failures_restore_backup(router):
     assert (config / "https-dns-proxy").read_text() == original_proxy
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
-    fail_file.unlink(); env.pop("FW4_FAIL_FILE")
+
+def test_https_dns_proxy_stop_failure_restores_backup(router):
+    root, config, backups, _, env = router
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
+    originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
-    service_fail = root / "service-fail"; service_fail.touch(); env["SERVICE_FAIL_ONCE"] = str(service_fail)
-    env["SERVICE_FAIL_NAME"] = "network-init"
-    env["SERVICE_FAIL_ACTION"] = "restart"
+    fail = root / "https-stop-fail"
+    fail.touch()
+    env["STOP_FAIL_ONCE"] = str(fail)
+    env["STOP_FAIL_NAME"] = "https-dns-proxy-init"
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
-    assert "service reload failed" in result.stderr
-    assert (config / "network").read_text() == original
+    assert "could not stop https-dns-proxy; backups restored" in result.stderr
+    assert {name: (config / name).read_text() for name in names} == originals
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
-@pytest.mark.parametrize(("service_name", "action"), [
-    ("wifi", "reload"),
-    ("firewall-init", "reload"),
-    ("sysntpd-init", "restart"),
-    ("https-dns-proxy-init", "restart"),
-    ("dnsmasq-init", "restart"),
-    ("adblock-init", "restart"),
+def test_https_dns_proxy_nonzero_stop_is_accepted_when_all_listeners_stopped(router):
+    root, _, backups, _, env = router
+    _, transaction = prepare(env)
+    fail = root / "https-stopped-with-nonzero"
+    fail.touch()
+    env["STOPPED_WITH_NONZERO_ONCE"] = str(fail)
+    env["STOP_FAIL_NAME"] = "https-dns-proxy-init"
+    process = subprocess.Popen(
+        [str(REPO / "router-config.sh"), "apply", transaction], env=env,
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    pending = backups / transaction / "pending"
+    lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
+    for _ in range(100):
+        if pending.exists() and not lock.exists(): break
+        time.sleep(0.02)
+    assert pending.exists() and not lock.exists()
+    run_router(env, "confirm", transaction)
+    stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 0, stderr
+    assert "https-dns-proxy stop returned nonzero; verifying listeners stopped" in stdout
+    assert (backups / transaction / "state").read_text().strip() == "confirmed"
+
+
+def test_https_dns_proxy_nonzero_restart_is_accepted_when_all_listeners_are_ready(router):
+    root, _, backups, _, env = router
+    _, transaction = prepare(env)
+    fail = root / "https-restart-fail"
+    fail.touch()
+    env["SERVICE_FAIL_ONCE"] = str(fail)
+    env["SERVICE_FAIL_NAME"] = "https-dns-proxy-init"
+    env["SERVICE_FAIL_ACTION"] = "restart"
+    process = subprocess.Popen(
+        [str(REPO / "router-config.sh"), "apply", transaction], env=env,
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    pending = backups / transaction / "pending"
+    lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
+    for _ in range(100):
+        if pending.exists() and not lock.exists(): break
+        time.sleep(0.02)
+    assert pending.exists() and not lock.exists()
+    run_router(env, "confirm", transaction)
+    stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 0, stderr
+    assert "https-dns-proxy restart returned nonzero; verifying listeners" in stdout
+    assert (backups / transaction / "state").read_text().strip() == "confirmed"
+
+
+@pytest.mark.parametrize(("service_name", "action", "failure_label"), [
+    ("network-init", "reload", "network"),
+    ("wifi", "reload", "wifi"),
+    ("firewall-init", "reload", "firewall"),
+    ("sysntpd-init", "restart", "sysntpd"),
+    ("https-dns-proxy-init", "restart", "https-dns-proxy"),
+    ("dnsmasq-init", "restart", "dnsmasq"),
+    ("adblock-init", "restart", "adblock-fast"),
 ])
-def test_each_coordinated_service_failure_restores_every_file(router, service_name, action):
+def test_each_coordinated_service_failure_is_named_and_restores_every_file(
+    router, service_name, action, failure_label
+):
     root, config, backups, _, env = router
     names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
     originals = {name: (config / name).read_text() for name in names}
@@ -523,9 +689,16 @@ def test_each_coordinated_service_failure_restores_every_file(router, service_na
         env["SERVICE_FAIL_ONCE"] = str(fail)
         env["SERVICE_FAIL_NAME"] = service_name
         env["SERVICE_FAIL_ACTION"] = action
+    if service_name == "https-dns-proxy-init":
+        proc_net = Path(env["ROUTER_CONFIG_PROC_NET_DIR"])
+        backup_only = "".join(
+            f"   {index}: 0100007F:{port:04X} 00000000:0000 0A\n"
+            for index, port in enumerate((5053, 5054, 5999))
+        )
+        (proc_net / "tcp").write_text(backup_only)
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
-    assert "service reload failed" in result.stderr
+    assert f"service reload failed at {failure_label}; backups restored" in result.stderr
     assert {name: (config / name).read_text() for name in names} == originals
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
@@ -690,7 +863,7 @@ def test_all_package_installation_uses_apk(router):
     run_module(env, "base-packages.sh", "base_packages_run")
     assert apk_log.read_text().splitlines() == [
         "update",
-        "add gawk grep sed coreutils-sort nano",
+        "add gawk grep sed ss coreutils-sort nano",
     ]
     project_shell = "\n".join(
         path.read_text()
@@ -705,6 +878,7 @@ def test_all_package_installation_uses_apk(router):
 def test_setup_declares_fixed_module_order_and_all_members():
     source = (REPO / "setup.sh").read_text()
     calls = [
+        'router-config.sh" check-base',
         "base_packages_run",
         "dns_over_https_install",
         "adblock_fast_install",

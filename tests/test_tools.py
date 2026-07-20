@@ -1,0 +1,304 @@
+import importlib.util
+import io
+import tarfile
+from pathlib import Path
+
+
+REPO = Path(__file__).parents[1]
+
+
+def load_script(name: str, relative: str):
+    spec = importlib.util.spec_from_file_location(name, REPO / relative)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_vm_release_inputs_are_pinned_and_archive_is_secret_free(tmp_path):
+    vm = load_script("run_vm_tests", "tools/run-vm-tests.py")
+    assert vm.RELEASE == "25.12.4"
+    assert set(vm.ARTIFACTS) == {
+        "openwrt-25.12.4-armsr-armv8-generic-kernel.bin",
+        "openwrt-25.12.4-armsr-armv8-generic-initramfs-kernel.bin",
+        "openwrt-25.12.4-armsr-armv8-generic-ext4-rootfs.img.gz",
+    }
+    assert all(len(value) == 64 for value in vm.ARTIFACTS.values())
+    archive = tmp_path / "repository.tar.gz"
+    assert len(vm.make_repository_archive(archive)) == 64
+    with tarfile.open(archive) as bundle:
+        names = bundle.getnames()
+    assert "openwrt/tools/vm/guest-tests.sh" in names
+    assert not any("/.git/" in name or "/.cache/" in name for name in names)
+
+
+def test_vm_installs_split_resize2fs_package():
+    source = (REPO / "tools/run-vm-tests.py").read_text()
+    assert "apk add resize2fs" in source
+    assert "apk add e2fsprogs" not in source
+    assert "for attempt in 1 2 3; do apk update && break" in source
+    assert "! grep -q '^/dev/vda ' /proc/mounts" in source
+    assert "resize2fs /dev/vda && sync" in source
+
+
+def test_vm_initramfs_does_not_mount_acceptance_disk_as_root():
+    vm = load_script("run_vm_initramfs", "tools/run-vm-tests.py")
+    initramfs = vm.qemu_command("qemu", Path("initramfs"), Path("disk"), False)
+    disk_root = vm.qemu_command("qemu", Path("kernel"), Path("disk"), True)
+    assert initramfs[initramfs.index("-append") + 1] == "console=ttyAMA0,115200n8"
+    assert disk_root[disk_root.index("-append") + 1].startswith("root=/dev/vda rootwait ")
+
+
+def test_vm_guest_avoids_builtin_and_virtual_package_names():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    assert "kmod-8021q" not in source
+    assert "wpa-supplicant-mesh" not in source
+    for package in (
+        "diffutils",
+        "ip-full",
+        "kmod-veth",
+        "kmod-nft-bridge",
+        "tcpdump",
+        "bind-dig",
+        "kmod-mac80211-hwsim",
+        "iw-full",
+        "wifi-scripts",
+        "wpad-mesh-mbedtls",
+        "wireguard-tools",
+    ):
+        assert package in source
+    assert source.index("rmmod mac80211_hwsim") < source.index(
+        "insmod mac80211_hwsim radios=6"
+    )
+    assert "modprobe mac80211_hwsim radios=6" not in source
+    assert source.index("apk add diffutils") < source.index("/etc/init.d/wpad restart")
+    assert source.index("wifi-scripts") < source.index("/etc/init.d/network restart")
+    assert 'mv "$wpad_capabilities" "$wpad_capabilities_saved"' in source
+    assert "ubus -S list hostapd" in source
+    assert "ubus -S list wpa_supplicant" in source
+    assert source.index("/etc/init.d/wpad restart") < source.index("rmmod mac80211_hwsim")
+    assert source.index("insmod mac80211_hwsim radios=6") < source.index(
+        "/etc/init.d/network restart"
+    )
+    assert source.index('uci set "wireless.radio1.phy=$ap_2g_phy"') < source.index(
+        "/etc/init.d/network restart"
+    )
+
+
+def test_vm_guest_repeats_failure_reason_after_verbose_diagnostics():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    fail_body = source[source.index("fail() {") : source.index("\n}", source.index("fail() {"))]
+    assert fail_body.count("printf 'vm-test: %s\\n'") == 2
+    assert fail_body.rindex("printf 'vm-test: %s\\n'") > fail_body.index("logread")
+    assert "tail -n 200 /tmp/setup.log" in fail_body
+    assert fail_body.index("tail -n 200 /tmp/setup.log") > fail_body.index("logread")
+
+
+def test_vm_guest_reports_redacted_idempotence_diff_after_verbose_diagnostics():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    fail_body = source[source.index("fail() {") : source.index("\n}", source.index("fail() {"))]
+    assert "cat /tmp/vm-test-failure-detail" in fail_body
+    assert fail_body.index("cat /tmp/vm-test-failure-detail") > fail_body.index("logread")
+
+    export_start = source.index("export_normalized_uci() {")
+    export_body = source[export_start : source.index("\n}", export_start)]
+    assert 'uci show "$package"' in export_body
+    for secret_option in ("private_key", "preshared_key", "wireless\\.[^.]*\\.key"):
+        assert secret_option in export_body
+    assert "adblock-fast\\.[^.]*\\.size" in export_body
+    assert "occurrence[key]++" in export_body
+    assert "sort" in export_body
+
+    assert "diff -u /tmp/first.export /tmp/second.export" in source
+    assert (
+        "diff -u /tmp/first.export /tmp/second.export "
+        ">/tmp/vm-test-failure-detail 2>&1"
+    ) in source
+
+
+def test_vm_guest_waits_for_apply_to_release_lock_before_confirming():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    helper_start = source.index("run_and_confirm() {")
+    helper = source[helper_start : source.index("\n}", helper_start)]
+    pending = helper.index("setup did not create a pending transaction")
+    unlocked = helper.index("[ ! -d /var/lock/router-config.lock ]")
+    confirm = helper.index('/usr/libexec/router-config confirm "$transaction"')
+    assert pending < unlocked < confirm
+
+
+def test_vm_guest_checks_doh_listeners_across_rollback_phases():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    assert "check_doh_listeners 'before rollback'" in source
+    assert "check_doh_listeners 'after manual rollback'" in source
+    assert "check_doh_listeners 'after early-boot recovery'" in source
+    helper_start = source.index("check_doh_listeners() {")
+    helper = source[helper_start : source.index("\n}", helper_start)]
+    assert "ss -lntu" in helper
+    assert "/proc/net/tcp /proc/net/udp" in helper
+
+
+def test_vm_guest_moves_wifi_phys_before_creating_namespaced_clients():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    helper_start = source.index("wifi_client() {")
+    helper = source[helper_start : source.index("\n}", helper_start)]
+    move_phy = 'iw phy "$client_phy" set netns name "$client_ns"'
+    create_interface = (
+        'iw phy "$client_phy" interface add "$client_if" type managed'
+    )
+    assert move_phy in helper
+    assert create_interface in helper
+    assert helper.index(move_phy) < helper.index(create_interface)
+    assert 'ip link set "$client_if" netns "$client_ns"' not in helper
+
+
+def test_vm_guest_sets_regulatory_country_and_reports_wifi_failures():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    assert "set wireless.radio0.country='US'" in source
+    assert "set wireless.radio1.country='US'" in source
+    helper_start = source.index("wifi_client() {")
+    helper = source[helper_start : source.index('\nwifi_client "$pixel_client_phy"', helper_start)]
+    assert "iw reg get" in helper
+    assert 'ip netns exec "$client_ns" iw dev "$client_if" link' in helper
+    assert "logread -e hostapd -e wpa_supplicant" in helper
+
+
+def test_vm_guest_checks_ap_readiness_across_apply_and_rollback_phases():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    assert "check_ap_interfaces 'after first installation'" in source
+    assert "check_ap_interfaces 'after second installation'" in source
+    assert "check_ap_interfaces 'after manual rollback'" in source
+    assert "check_ap_interfaces 'after early-boot recovery'" in source
+    helper_start = source.index("check_ap_interfaces() {")
+    helper_end = source.index("\napk update", helper_start)
+    helper = source[helper_start:helper_end]
+    assert 'awk \'$1 == "type" && $2 == "AP"' in helper
+    assert "uci show wireless | sed '/\\.key=/d'" in helper
+    assert "ubus -v list hostapd" in helper
+    assert "ubus call network.wireless status" in helper
+    assert "ls -1 /sys/class/ieee80211" in helper
+    assert "-printf" not in helper
+
+
+def test_vm_guest_synchronizes_static_wan_before_dot_probe():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    network_restart = source.index(
+        "/etc/init.d/network restart || fail 'failed to restart network for static VM WAN'"
+    )
+    wan_ready = source.index('grep -q \'"l3_device": "vmwan"\'', network_restart)
+    connectivity_probe = source.index(
+        'ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2', wan_ready
+    )
+    firewall_reload = source.index(
+        "/etc/init.d/firewall reload || fail "
+        "'firewall reload failed after static VM WAN activation'",
+        connectivity_probe,
+    )
+    dot_probe = source.index(
+        "ip netns exec guest dig +tcp +time=1 +tries=1", firewall_reload
+    )
+    assert network_restart < wan_ready < connectivity_probe < firewall_reload < dot_probe
+    assert "ip netns exec guest busybox nc" not in source
+    assert "PixelGuest-Reject-DoT packets before:" in source
+    assert "PixelGuest-Reject-DoT packets after:" in source
+    assert "--- DoT probe output ---" in source
+
+
+def test_vm_guest_uses_diagnostics_for_pre_confirmation_failures():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    helper_start = source.index("run_and_confirm() {")
+    helper = source[helper_start : source.index("\n}", helper_start)]
+    assert "fail 'pending transaction disappeared before confirmation'" in helper
+    assert "fail 'setup exited before confirmation'" in helper
+    assert (
+        '/usr/libexec/router-config confirm "$transaction" || '
+        "fail 'transaction confirmation failed'"
+    ) in helper
+    assert "--- transaction state ---" in source
+
+
+def test_imagebuilder_gate_matches_every_installer_package():
+    imagebuilder = load_script("check_imagebuilder", "tools/check-imagebuilder.py")
+    assert imagebuilder.EXPECTED == "8207da9d689f02d42833e4e8abc9eabb4ec63a433a7a26473296d3d2c489e257"
+    shell_source = "\n".join(
+        path.read_text() for path in [REPO / "setup.sh", *(REPO / "modules").glob("*.sh")]
+    )
+    for package in imagebuilder.PACKAGES.split():
+        assert package in shell_source
+
+
+def test_ci_uses_vm_and_native_imagebuilder_without_container_engines():
+    workflow = (REPO / ".github/workflows/test.yml").read_text()
+    assert "run-vm-tests.py --profile stable" in workflow
+    assert "run-vm-tests.py --profile live" in workflow
+    assert "check-imagebuilder.py" in workflow
+    assert "docker" not in workflow.lower()
+    assert "podman" not in workflow.lower()
+
+
+def test_vm_console_prompt_does_not_assume_a_hostname():
+    source = (REPO / "tools/run-vm-tests.py").read_text()
+    assert 'console.wait_for("root@", 30)' in source
+    assert 'console.wait_for("root@OpenWrt:/#"' not in source
+
+
+def test_vm_serial_lines_use_carriage_return():
+    vm = load_script("run_vm_serial", "tools/run-vm-tests.py")
+
+    class Process:
+        stdin = io.BytesIO()
+
+    console = object.__new__(vm.SerialConsole)
+    console.process = Process()
+    console.send_line("echo ready")
+    assert console.process.stdin.getvalue() == b"        echo ready\r"
+
+
+def test_vm_console_activation_survives_a_dropped_first_byte():
+    vm = load_script("run_vm_activation", "tools/run-vm-tests.py")
+
+    class Process:
+        stdin = io.BytesIO()
+
+    console = object.__new__(vm.SerialConsole)
+    console.process = Process()
+    console.send_line()
+    assert console.process.stdin.getvalue() == b"\r\r"
+
+
+def test_vm_command_marker_cannot_match_terminal_echo(monkeypatch):
+    vm = load_script("run_vm_command", "tools/run-vm-tests.py")
+
+    class Process:
+        stdin = io.BytesIO()
+
+    console = object.__new__(vm.SerialConsole)
+    console.process = Process()
+    console.buffer = ""
+    monkeypatch.setattr(vm.time, "monotonic_ns", lambda: 123)
+
+    def complete_after_split_output(pattern, _timeout):
+        sent = console.process.stdin.getvalue().decode()
+        assert pattern.pattern == r"__VM_DONE_123__\d+\r?\n"
+        assert "__VM_DONE_123__" not in sent
+        console.buffer += "command output\r\n__VM_DONE_123__"
+        assert not pattern.search(console.buffer)
+        console.buffer += "0\r\n"
+        assert pattern.search(console.buffer)
+        return console.buffer
+
+    console.wait_for_regex = complete_after_split_output
+    assert console.command("exit 0") == "command output\r\n"
+    sent = console.process.stdin.getvalue()
+    assert sent.startswith(b"        ( exit 0 ); vm_status=$?;")
+
+
+def test_vm_passively_waits_for_boot_network_before_sending_commands():
+    source = (REPO / "tools/run-vm-tests.py").read_text()
+    ready = source.index(
+        'console.wait_for("br-lan: port 1(eth0) entered forwarding state", 60)'
+    )
+    verify = source.index("ifstatus lan | grep")
+    remove_lan = source.index("uci -q delete network.lan")
+    stock_wan = source.index("uci -q set network.wan=interface")
+    assert ready < verify < remove_lan < stock_wan
+    assert "network.uplink" not in source

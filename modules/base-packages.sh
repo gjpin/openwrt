@@ -8,6 +8,7 @@ base_packages_run() {
         gawk \
         grep \
         sed \
+        ss \
         coreutils-sort \
         nano
 }

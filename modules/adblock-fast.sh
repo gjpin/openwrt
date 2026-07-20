@@ -15,9 +15,7 @@ adblock_fast_stage() {
     adblock_fast_show=$(uci -q -c "$candidate_dir" show adblock-fast) ||
         die 'failed to inspect adblock-fast candidate sources'
     printf '%s\n' "$adblock_fast_show" |
-        sed -n \
-            -e "s/^adblock-fast\.\([^.=]*\)='file_url'$/\1/p" \
-            -e "s/^adblock-fast\.\([^.=]*\)=file_url$/\1/p" |
+        sed -n "s/^adblock-fast\.\([^.=]*\)=file_url$/\1/p" |
         awk '{ section[NR] = $0 } END { for (i = NR; i > 0; i--) print section[i] }' |
         while IFS= read -r section_name; do
             uci -q -c "$candidate_dir" delete "adblock-fast.$section_name" ||
