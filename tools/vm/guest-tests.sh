@@ -22,6 +22,22 @@ fail() {
     find /root/router-config-backups -mindepth 2 -maxdepth 2 \
         \( -name state -o -name pending \) -print -exec sed -n '1p' {} \; >&2 2>&1 || :
     printf '%s\n' '--- end transaction state ---' >&2
+    printf '%s\n' '--- transaction lock ---' >&2
+    if [ -e /var/lock/router-config.lock ]; then
+        ls -la /var/lock/router-config.lock >&2 2>&1 || :
+        if [ -d /var/lock/router-config.lock ]; then
+            ls -la /var/lock/router-config.lock/ >&2 2>&1 || :
+            if [ -r /var/lock/router-config.lock/pid ]; then
+                printf 'pid file: ' >&2
+                sed -n '1p' /var/lock/router-config.lock/pid >&2 2>&1 || :
+            else
+                printf '%s\n' 'pid file: missing' >&2
+            fi
+        fi
+    else
+        printf '%s\n' 'lock path absent' >&2
+    fi
+    printf '%s\n' '--- end transaction lock ---' >&2
     logread >&2 2>&1 || :
     if [ -s /tmp/setup.log ]; then
         printf '%s\n' '--- setup log ---' >&2

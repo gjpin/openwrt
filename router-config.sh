@@ -67,29 +67,51 @@ require_base_commands() {
     done
 }
 
+remove_lock_dir() {
+    rmdir "$LOCK_DIR" 2>/dev/null || rm -rf "$LOCK_DIR"
+    [ ! -e "$LOCK_DIR" ] || die "failed to remove lock directory: $LOCK_DIR"
+}
+
 acquire_lock() {
     lock_parent=${LOCK_DIR%/*}
     [ "$lock_parent" = "$LOCK_DIR" ] || mkdir -p "$lock_parent"
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
-        printf '%s\n' "$$" >"$LOCK_DIR/pid"
-        trap 'release_lock' EXIT HUP INT TERM
-        return
-    fi
-    lock_pid=
-    [ ! -r "$LOCK_DIR/pid" ] || lock_pid=$(sed -n '1p' "$LOCK_DIR/pid")
-    case $lock_pid in
-        '' | *[!0-9]*) die "another operation holds $LOCK_DIR" ;;
-    esac
-    if kill -0 "$lock_pid" 2>/dev/null; then
-        die "another operation holds $LOCK_DIR (pid $lock_pid)"
-    fi
-    die "stale lock found at $LOCK_DIR; inspect and remove it manually"
+    lock_attempt=0
+    while [ "$lock_attempt" -lt 2 ]; do
+        lock_attempt=$((lock_attempt + 1))
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            printf '%s\n' "$$" >"$LOCK_DIR/pid"
+            trap 'release_lock' EXIT HUP INT TERM
+            return
+        fi
+        lock_pid=
+        [ ! -r "$LOCK_DIR/pid" ] || lock_pid=$(sed -n '1p' "$LOCK_DIR/pid")
+        case $lock_pid in
+            '' | *[!0-9]*)
+                # Empty or corrupt lock dirs are safe to clear and retry once.
+                remove_lock_dir
+                continue
+                ;;
+        esac
+        if kill -0 "$lock_pid" 2>/dev/null; then
+            die "another operation holds $LOCK_DIR (pid $lock_pid)"
+        fi
+        # Owner pid is dead; clear the stale lock and retry once.
+        remove_lock_dir
+    done
+    die "could not acquire lock at $LOCK_DIR"
 }
 
 release_lock() {
-    if [ -r "$LOCK_DIR/pid" ] && [ "$(sed -n '1p' "$LOCK_DIR/pid")" = "$$" ]; then
+    if [ -d "$LOCK_DIR" ]; then
+        if [ -r "$LOCK_DIR/pid" ]; then
+            lock_pid=$(sed -n '1p' "$LOCK_DIR/pid")
+            if [ "$lock_pid" != "$$" ]; then
+                trap - EXIT HUP INT TERM
+                return 0
+            fi
+        fi
         rm -f "$LOCK_DIR/pid"
-        rmdir "$LOCK_DIR" 2>/dev/null || :
+        remove_lock_dir
     fi
     trap - EXIT HUP INT TERM
 }

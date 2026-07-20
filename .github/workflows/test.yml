@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
+      - name: Install Python test deps
+        run: pip install -r requirements-dev.txt
       - name: Install static-check tools
         run: sudo apt-get update && sudo apt-get install -y shellcheck shfmt
       - name: Run fast and static checks

@@ -214,6 +214,9 @@ def test_vm_guest_uses_diagnostics_for_pre_confirmation_failures():
         "fail 'transaction confirmation failed'"
     ) in helper
     assert "--- transaction state ---" in source
+    assert "--- transaction lock ---" in source
+    assert "ls -la /var/lock/router-config.lock" in source
+    assert "pid file: missing" in source
 
 
 def test_imagebuilder_gate_matches_every_installer_package():
@@ -231,6 +234,8 @@ def test_ci_uses_vm_and_native_imagebuilder_without_container_engines():
     assert "run-vm-tests.py --profile stable" in workflow
     assert "run-vm-tests.py --profile live" in workflow
     assert "check-imagebuilder.py" in workflow
+    assert "pip install -r requirements-dev.txt" in workflow
+    assert (REPO / "requirements-dev.txt").read_text().strip().startswith("pytest==")
     assert "docker" not in workflow.lower()
     assert "podman" not in workflow.lower()
 
