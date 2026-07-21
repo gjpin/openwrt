@@ -217,7 +217,10 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         "ifdown lan || fail 'failed to release overlapping stock LAN'", lan_ready
     )
     lan_down_wait = source.index("ip -4 address show dev br-lan", lan_down_command)
-    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', lan_down_wait)
+    bridge_recreate = source.index(
+        "ip link add br-lan type bridge vlan_filtering 1", lan_down_wait
+    )
+    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', bridge_recreate)
     firewall_restart = source.index(
         "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
         wan_ready,
@@ -234,6 +237,7 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         < lan_ready
         < lan_down_command
         < lan_down_wait
+        < bridge_recreate
         < wan_ready
         < firewall_restart
         < ping_probe

@@ -319,6 +319,14 @@ while [ "$stock_lan_attempt" -lt 30 ]; do
     sleep 1
 done
 [ "$stock_lan_down" = 1 ] || fail 'overlapping stock LAN stayed active'
+# netifd removes an unreferenced bridge when lan goes down. Preflight still
+# requires the target br-lan device to exist, so recreate the addressless
+# disposable bridge; candidate apply will attach the configured VLAN devices.
+if ! ip link show br-lan >/dev/null 2>&1; then
+    ip link add br-lan type bridge vlan_filtering 1 ||
+        fail 'failed to recreate addressless br-lan'
+fi
+ip link set br-lan up || fail 'failed to enable addressless br-lan'
 uplink_ready=0
 uplink_attempt=0
 while [ "$uplink_attempt" -lt 30 ]; do
