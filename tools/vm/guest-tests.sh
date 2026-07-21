@@ -293,7 +293,8 @@ uci commit wireless
 # Restart only after replacing the auto-loaded hwsim PHYs and seeding their
 # final mapping. The stock LAN and emulated ISP intentionally share
 # 192.168.1.0/24 so the applied static WAN uses its production address and
-# gateway; keep the stock LAN in UCI for preflight but down at runtime.
+# gateway. Keep the stock LAN in UCI and preserve its DSA-like bridge topology
+# for preflight, but remove its live address until candidate apply replaces it.
 /etc/init.d/network restart || fail 'failed to restart netifd after installing wifi-scripts'
 stock_lan_ready=0
 stock_lan_attempt=0
@@ -306,27 +307,18 @@ while [ "$stock_lan_attempt" -lt 30 ]; do
     sleep 1
 done
 [ "$stock_lan_ready" = 1 ] || fail 'overlapping stock LAN did not start'
-ifdown lan || fail 'failed to release overlapping stock LAN'
-stock_lan_down=0
+ip -4 address flush dev br-lan || fail 'failed to unnumber overlapping stock LAN'
+stock_lan_unnumbered=0
 stock_lan_attempt=0
 while [ "$stock_lan_attempt" -lt 30 ]; do
     stock_lan_attempt=$((stock_lan_attempt + 1))
-    if ! ifstatus lan | grep -q '"up": true' &&
-        ! ip -4 address show dev br-lan | grep -q '192\.168\.1\.1/24'; then
-        stock_lan_down=1
+    if ! ip -4 address show dev br-lan | grep -q '192\.168\.1\.1/24'; then
+        stock_lan_unnumbered=1
         break
     fi
     sleep 1
 done
-[ "$stock_lan_down" = 1 ] || fail 'overlapping stock LAN stayed active'
-# netifd removes an unreferenced bridge when lan goes down. Preflight still
-# requires the target br-lan device to exist, so recreate the addressless
-# disposable bridge; candidate apply will attach the configured VLAN devices.
-if ! ip link show br-lan >/dev/null 2>&1; then
-    ip link add br-lan type bridge vlan_filtering 1 ||
-        fail 'failed to recreate addressless br-lan'
-fi
-ip link set br-lan up || fail 'failed to enable addressless br-lan'
+[ "$stock_lan_unnumbered" = 1 ] || fail 'overlapping stock LAN stayed numbered'
 uplink_ready=0
 uplink_attempt=0
 while [ "$uplink_attempt" -lt 30 ]; do
