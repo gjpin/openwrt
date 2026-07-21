@@ -320,7 +320,7 @@ def main() -> int:
         console.command(f"uclient-fetch '{guest_url}' -O /tmp/repository.tar.gz", 60)
         console.command(f"echo '{archive_hash}  /tmp/repository.tar.gz' | sha256sum -c -", 30)
         console.command("mkdir -p /tmp/source; tar -xzf /tmp/repository.tar.gz -C /tmp/source", 30)
-        console.command(f"cd /tmp/source/openwrt && sh tools/vm/guest-tests.sh {args.profile}", 1800)
+        console.command(f"cd /tmp/source/openwrt && sh tools/vm/guest-tests.sh {args.profile}", 2400)
         print(f"OpenWrt {RELEASE} {args.profile} VM suite passed")
         return 0
     except Exception as error:

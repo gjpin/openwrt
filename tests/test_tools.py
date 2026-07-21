@@ -212,19 +212,19 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
         wan_ready,
     )
-    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", firewall_restart)
-    wget_probe = source.index(
-        "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/", apk_gate
-    )
     ping_probe = source.index("ping -c 1 -W 2 10.0.2.2", firewall_restart)
-    setup_start = source.index("run_and_confirm() {", wget_probe)
+    wget_probe = source.index(
+        "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/", ping_probe
+    )
+    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", wget_probe)
+    setup_start = source.index("run_and_confirm() {", apk_gate)
     assert (
         network_restart
         < wan_ready
         < firewall_restart
         < ping_probe
-        < apk_gate
         < wget_probe
+        < apk_gate
         < setup_start
     )
     assert "fail 'apk update failed after WAN recovery'" in source
@@ -244,6 +244,7 @@ def test_vm_guest_restores_qemu_wan_before_second_setup_and_live_doh():
     assert "ping -c 1 -W 2 10.0.2.2" in helper
     assert "10.0.2.0/24" in helper
     assert "10.0.2.2" in helper
+    assert "debug-3aae" not in helper
 
     first_setup = source.index("run_and_confirm first")
     wan_static = source.index(
@@ -259,6 +260,11 @@ def test_vm_guest_restores_qemu_wan_before_second_setup_and_live_doh():
     )
     assert first_setup < wan_static < restore_before_second < second_setup
     assert live < restore_before_live
+
+
+def test_vm_guest_command_timeout_covers_two_setup_passes():
+    source = (REPO / "tools/run-vm-tests.py").read_text()
+    assert 'guest-tests.sh {args.profile}", 2400)' in source
 
 
 def test_vm_guest_synchronizes_static_wan_before_dot_probe():

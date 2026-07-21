@@ -53,11 +53,6 @@ fail() {
         cat /tmp/vm-test-failure-detail >&2 2>&1 || :
         printf '%s\n' '--- end failure detail ---' >&2
     fi
-    if [ -s /tmp/debug-3aae.log ]; then
-        printf '%s\n' '--- debug-3aae ---' >&2
-        cat /tmp/debug-3aae.log >&2 2>&1 || :
-        printf '%s\n' '--- end debug-3aae ---' >&2
-    fi
     printf 'vm-test: %s\n' "$failure" >&2
     exit 1
 }
@@ -313,32 +308,30 @@ done
 # reloaded from the stock overlay, and apk's wget then fails with EPERM
 # ("Operation not permitted") against downloads.openwrt.org.
 /etc/init.d/firewall restart || fail 'failed to apply seeded firewall'
-# Wait until apk can refresh indexes. QEMU user-net plus DNS/firewall hotplug
-# can still flake briefly after WAN is up; setup.sh needs a working mirror.
-apk_ready=0
-apk_attempt=0
-while [ "$apk_attempt" -lt 15 ]; do
-    apk_attempt=$((apk_attempt + 1))
-    printf 'vm-test: WAN apk probe attempt %s/15\n' "$apk_attempt" >&2
-    # -T keeps a blackholed HTTPS probe from hanging the suite for minutes.
+# Wait until the QEMU uplink can reach the OpenWrt mirror. Probe with ping plus
+# a bounded HTTPS fetch first; only then run apk update so retries stay cheap.
+egress_ready=0
+egress_attempt=0
+while [ "$egress_attempt" -lt 15 ]; do
+    egress_attempt=$((egress_attempt + 1))
+    printf 'vm-test: WAN egress probe attempt %s/15\n' "$egress_attempt" >&2
     if ping -c 1 -W 2 10.0.2.2 >/tmp/vm-test-ping-probe 2>&1 &&
-        apk update >/tmp/vm-test-apk-update 2>&1 &&
         uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
             >/tmp/vm-test-wget-probe 2>&1; then
-        apk_ready=1
+        egress_ready=1
         break
     fi
     sleep 2
 done
-if [ "$apk_ready" != 1 ]; then
+if [ "$egress_ready" != 1 ] || ! apk update >/tmp/vm-test-apk-update 2>&1; then
     {
-        printf 'apk update failed after %s attempts\n' "$apk_attempt"
+        printf 'apk update failed after %s egress probe attempts\n' "$egress_attempt"
         printf '%s\n' '--- ping probe ---'
         cat /tmp/vm-test-ping-probe 2>&1 || :
-        printf '%s\n' '--- apk update output ---'
-        cat /tmp/vm-test-apk-update 2>&1 || :
         printf '%s\n' '--- wget probe ---'
         cat /tmp/vm-test-wget-probe 2>&1 || :
+        printf '%s\n' '--- apk update output ---'
+        cat /tmp/vm-test-apk-update 2>&1 || :
         printf '%s\n' '--- WAN status ---'
         ifstatus wan || :
         printf '%s\n' '--- resolv.conf.auto ---'
@@ -377,15 +370,6 @@ restore_qemu_wan_dhcp() {
         "$(uci -q get network.wan.proto || :)" \
         "$(uci -q get network.wan.ipaddr || :)" \
         "$(uci -q get network.wan.gateway || :)" >&2
-    {
-        printf '{"sessionId":"3aae","hypothesisId":"H1","location":"guest-tests.sh:restore_qemu_wan_dhcp","message":"before restore","data":{'
-        printf '"phase":"%s","wan_proto":"%s","wan_ip":"%s","wan_gateway":"%s"' \
-            "$phase" \
-            "$(uci -q get network.wan.proto || :)" \
-            "$(uci -q get network.wan.ipaddr || :)" \
-            "$(uci -q get network.wan.gateway || :)"
-        printf '},"timestamp":%s}\n' "$(date +%s)000"
-    } >>/tmp/debug-3aae.log 2>/dev/null || :
     uci set network.wan.device='eth0'
     uci set network.wan.proto='dhcp'
     uci -q delete network.wan.ipaddr
@@ -406,33 +390,31 @@ restore_qemu_wan_dhcp() {
     done
     [ "$uplink_ready" = 1 ] || fail "QEMU DHCP WAN did not recover ($phase)"
     /etc/init.d/firewall restart || fail "failed to reapply firewall after QEMU DHCP WAN ($phase)"
-    # Require a real HTTPS fetch. apk update can exit 0 on stale indexes even
-    # when QEMU user-net egress is still broken. Bound wget so a blackhole
-    # cannot stall the suite.
-    apk_ready=0
-    apk_attempt=0
-    while [ "$apk_attempt" -lt 15 ]; do
-        apk_attempt=$((apk_attempt + 1))
-        printf 'vm-test: restore_qemu_wan_dhcp (%s) apk probe %s/15\n' \
-            "$phase" "$apk_attempt" >&2
+    # Cheap connectivity probes first; one apk update after egress works.
+    egress_ready=0
+    egress_attempt=0
+    while [ "$egress_attempt" -lt 15 ]; do
+        egress_attempt=$((egress_attempt + 1))
+        printf 'vm-test: restore_qemu_wan_dhcp (%s) egress probe %s/15\n' \
+            "$phase" "$egress_attempt" >&2
         if ping -c 1 -W 2 10.0.2.2 >/tmp/vm-test-ping-probe 2>&1 &&
-            apk update >/tmp/vm-test-apk-update 2>&1 &&
             uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
                 >/tmp/vm-test-wget-probe 2>&1; then
-            apk_ready=1
+            egress_ready=1
             break
         fi
         sleep 2
     done
-    if [ "$apk_ready" != 1 ]; then
+    if [ "$egress_ready" != 1 ] || ! apk update >/tmp/vm-test-apk-update 2>&1; then
         {
-            printf 'QEMU DHCP WAN apk probe failed after %s attempts (%s)\n' "$apk_attempt" "$phase"
+            printf 'QEMU DHCP WAN egress probe failed after %s attempts (%s)\n' \
+                "$egress_attempt" "$phase"
             printf '%s\n' '--- ping probe ---'
             cat /tmp/vm-test-ping-probe 2>&1 || :
-            printf '%s\n' '--- apk update output ---'
-            cat /tmp/vm-test-apk-update 2>&1 || :
             printf '%s\n' '--- wget probe ---'
             cat /tmp/vm-test-wget-probe 2>&1 || :
+            printf '%s\n' '--- apk update output ---'
+            cat /tmp/vm-test-apk-update 2>&1 || :
             printf '%s\n' '--- WAN status ---'
             ifstatus wan || :
             printf '%s\n' '--- ip route ---'
@@ -443,27 +425,10 @@ restore_qemu_wan_dhcp() {
     printf 'vm-test: restore_qemu_wan_dhcp (%s) ready eth0=%s\n' \
         "$phase" \
         "$(ip -4 -o addr show dev eth0 | awk '{print $4; exit}' || :)" >&2
-    {
-        printf '{"sessionId":"3aae","hypothesisId":"H1","location":"guest-tests.sh:restore_qemu_wan_dhcp","message":"after restore","data":{'
-        printf '"phase":"%s","wan_proto":"%s","ipv4":"%s"' \
-            "$phase" \
-            "$(uci -q get network.wan.proto || :)" \
-            "$(ip -4 -o addr show dev eth0 | awk '{print $4; exit}' || :)"
-        printf '},"timestamp":%s}\n' "$(date +%s)000"
-    } >>/tmp/debug-3aae.log 2>/dev/null || :
 }
 
 run_and_confirm() {
     setup_pass=${1:-unnamed}
-    {
-        printf '{"sessionId":"3aae","hypothesisId":"H1","location":"guest-tests.sh:run_and_confirm","message":"setup start","data":{'
-        printf '"pass":"%s","wan_proto":"%s","wan_ip":"%s","wan_gateway":"%s"' \
-            "$setup_pass" \
-            "$(uci -q get network.wan.proto || :)" \
-            "$(uci -q get network.wan.ipaddr || :)" \
-            "$(uci -q get network.wan.gateway || :)"
-        printf '},"timestamp":%s}\n' "$(date +%s)000"
-    } >>/tmp/debug-3aae.log 2>/dev/null || :
     ./setup.sh --recovery-ready >/tmp/setup.log 2>&1 &
     setup_pid=$!
     pending=
