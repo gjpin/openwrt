@@ -212,10 +212,12 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         "/etc/init.d/network restart || fail "
         "'failed to restart netifd after installing wifi-scripts'"
     )
-    lan_down = source.index(
-        "ifdown lan || fail 'failed to release overlapping stock LAN'", network_restart
+    lan_ready = source.index('ifstatus lan | grep -q \'"up": true\'', network_restart)
+    lan_down_command = source.index(
+        "ifdown lan || fail 'failed to release overlapping stock LAN'", lan_ready
     )
-    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', lan_down)
+    lan_down_wait = source.index("ip -4 address show dev br-lan", lan_down_command)
+    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', lan_down_wait)
     firewall_restart = source.index(
         "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
         wan_ready,
@@ -229,7 +231,9 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
     setup_start = source.index("run_and_confirm() {", apk_gate)
     assert (
         network_restart
-        < lan_down
+        < lan_ready
+        < lan_down_command
+        < lan_down_wait
         < wan_ready
         < firewall_restart
         < ping_probe

@@ -295,7 +295,30 @@ uci commit wireless
 # 192.168.1.0/24 so the applied static WAN uses its production address and
 # gateway; keep the stock LAN in UCI for preflight but down at runtime.
 /etc/init.d/network restart || fail 'failed to restart netifd after installing wifi-scripts'
+stock_lan_ready=0
+stock_lan_attempt=0
+while [ "$stock_lan_attempt" -lt 30 ]; do
+    stock_lan_attempt=$((stock_lan_attempt + 1))
+    if ifstatus lan | grep -q '"up": true'; then
+        stock_lan_ready=1
+        break
+    fi
+    sleep 1
+done
+[ "$stock_lan_ready" = 1 ] || fail 'overlapping stock LAN did not start'
 ifdown lan || fail 'failed to release overlapping stock LAN'
+stock_lan_down=0
+stock_lan_attempt=0
+while [ "$stock_lan_attempt" -lt 30 ]; do
+    stock_lan_attempt=$((stock_lan_attempt + 1))
+    if ! ifstatus lan | grep -q '"up": true' &&
+        ! ip -4 address show dev br-lan | grep -q '192\.168\.1\.1/24'; then
+        stock_lan_down=1
+        break
+    fi
+    sleep 1
+done
+[ "$stock_lan_down" = 1 ] || fail 'overlapping stock LAN stayed active'
 uplink_ready=0
 uplink_attempt=0
 while [ "$uplink_attempt" -lt 30 ]; do
