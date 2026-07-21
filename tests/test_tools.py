@@ -224,9 +224,9 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
     wget_probe = source.index(
         "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/", ping_probe
     )
-    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", wget_probe)
-    apk_retries = source.index('while [ "$apk_attempt" -lt 5 ]; do', apk_gate)
-    setup_start = source.index("run_and_confirm() {", apk_retries)
+    apk_retries = source.index('while [ "$apk_attempt" -lt 5 ]; do', wget_probe)
+    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", apk_retries)
+    setup_start = source.index("run_and_confirm() {", apk_gate)
     assert (
         network_restart
         < lan_down
@@ -234,8 +234,8 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         < firewall_restart
         < ping_probe
         < wget_probe
-        < apk_gate
         < apk_retries
+        < apk_gate
         < setup_start
     )
     assert "fail 'apk update failed after WAN recovery'" in source
