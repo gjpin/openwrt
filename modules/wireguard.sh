@@ -3,7 +3,13 @@
 # WireGuard package installation and transaction callbacks.
 
 wireguard_install() {
-    apk add wireguard-tools luci-proto-wireguard
+    attempt=0
+    while [ "$attempt" -lt 5 ]; do
+        attempt=$((attempt + 1))
+        apk add wireguard-tools luci-proto-wireguard && break
+        [ "$attempt" -lt 5 ] || die 'failed to install WireGuard packages'
+        sleep $((attempt * 2))
+    done
 }
 
 wireguard_render_overlay() {

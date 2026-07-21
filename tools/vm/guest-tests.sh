@@ -128,9 +128,17 @@ check_ap_interfaces() {
     fail "$wifi_phase: expected four AP interfaces, found $ap_count"
 }
 
-apk update
-apk add diffutils ip-full kmod-veth kmod-nft-bridge tcpdump bind-dig \
-    kmod-mac80211-hwsim iw-full wifi-scripts wpad-mesh-mbedtls wireguard-tools
+# QEMU user-net HTTPS to downloads.openwrt.org is flaky; retry the guest bootstrap.
+apk_boot_attempt=0
+while [ "$apk_boot_attempt" -lt 5 ]; do
+    apk_boot_attempt=$((apk_boot_attempt + 1))
+    apk update &&
+        apk add diffutils ip-full kmod-veth kmod-nft-bridge tcpdump bind-dig \
+            kmod-mac80211-hwsim iw-full wifi-scripts wpad-mesh-mbedtls wireguard-tools &&
+        break
+    [ "$apk_boot_attempt" -lt 5 ] || fail 'failed to install VM guest packages'
+    sleep $((apk_boot_attempt * 2))
+done
 # The base image starts wpad-basic before this suite replaces it. The wpad ACL
 # is also installed after ubusd loaded its startup ACL set, so a daemon jailed
 # as user network cannot publish its global ubus objects in this disposable VM.
@@ -296,6 +304,34 @@ while [ "$uplink_attempt" -lt 30 ]; do
     sleep 1
 done
 [ "$uplink_ready" = 1 ] || fail 'WAN did not recover after restarting netifd'
+# Apply the seeded firewall explicitly. netifd can mark WAN up before fw4 has
+# reloaded from the stock overlay, and apk's wget then fails with EPERM
+# ("Operation not permitted") against downloads.openwrt.org.
+/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'
+# Wait until apk can refresh indexes. QEMU user-net plus DNS/firewall hotplug
+# can still flake briefly after WAN is up; setup.sh needs a working mirror.
+apk_ready=0
+apk_attempt=0
+while [ "$apk_attempt" -lt 15 ]; do
+    apk_attempt=$((apk_attempt + 1))
+    if apk update >/tmp/vm-test-apk-update 2>&1; then
+        apk_ready=1
+        break
+    fi
+    sleep 2
+done
+if [ "$apk_ready" != 1 ]; then
+    {
+        printf 'apk update failed after %s attempts\n' "$apk_attempt"
+        printf '%s\n' '--- apk update output ---'
+        cat /tmp/vm-test-apk-update 2>&1 || :
+        printf '%s\n' '--- WAN status ---'
+        ifstatus wan || :
+        printf '%s\n' '--- resolv.conf.auto ---'
+        cat /tmp/resolv.conf.d/resolv.conf.auto 2>&1 || :
+    } >/tmp/vm-test-failure-detail 2>&1 || :
+    fail 'apk update failed after WAN recovery'
+fi
 
 server_private=$(wg genkey)
 server_public=$(printf '%s' "$server_private" | wg pubkey)

@@ -191,7 +191,7 @@ def test_vm_guest_checks_ap_readiness_across_apply_and_rollback_phases():
     assert "check_ap_interfaces 'after manual rollback'" in source
     assert "check_ap_interfaces 'after early-boot recovery'" in source
     helper_start = source.index("check_ap_interfaces() {")
-    helper_end = source.index("\napk update", helper_start)
+    helper_end = source.index("\napk_boot_attempt=0", helper_start)
     helper = source[helper_start:helper_end]
     assert 'awk \'$1 == "type" && $2 == "AP"' in helper
     assert "uci show wireless | sed '/\\.key=/d'" in helper
@@ -199,6 +199,24 @@ def test_vm_guest_checks_ap_readiness_across_apply_and_rollback_phases():
     assert "ubus call network.wireless status" in helper
     assert "ls -1 /sys/class/ieee80211" in helper
     assert "-printf" not in helper
+
+
+def test_vm_guest_waits_for_apk_after_wan_recovery():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    network_restart = source.index(
+        "/etc/init.d/network restart || fail "
+        "'failed to restart netifd after installing wifi-scripts'"
+    )
+    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', network_restart)
+    firewall_restart = source.index(
+        "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
+        wan_ready,
+    )
+    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", firewall_restart)
+    setup_start = source.index("run_and_confirm() {", apk_gate)
+    assert network_restart < wan_ready < firewall_restart < apk_gate < setup_start
+    assert "fail 'apk update failed after WAN recovery'" in source
+    assert "failed to install VM guest packages" in source
 
 
 def test_vm_guest_synchronizes_static_wan_before_dot_probe():

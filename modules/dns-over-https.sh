@@ -3,7 +3,13 @@
 # https-dns-proxy package installation and transaction callbacks.
 
 dns_over_https_install() {
-    apk add https-dns-proxy luci-app-https-dns-proxy
+    attempt=0
+    while [ "$attempt" -lt 5 ]; do
+        attempt=$((attempt + 1))
+        apk add https-dns-proxy luci-app-https-dns-proxy && break
+        [ "$attempt" -lt 5 ] || die 'failed to install https-dns-proxy packages'
+        sleep $((attempt * 2))
+    done
     https_dns_proxy_init=${ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT:-/etc/init.d/https-dns-proxy}
     "$https_dns_proxy_init" enable
 }
