@@ -213,10 +213,42 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         wan_ready,
     )
     apk_gate = source.index("apk update >/tmp/vm-test-apk-update", firewall_restart)
-    setup_start = source.index("run_and_confirm() {", apk_gate)
-    assert network_restart < wan_ready < firewall_restart < apk_gate < setup_start
+    wget_probe = source.index(
+        "uclient-fetch -O /dev/null https://downloads.openwrt.org/", apk_gate
+    )
+    setup_start = source.index("run_and_confirm() {", wget_probe)
+    assert network_restart < wan_ready < firewall_restart < apk_gate < wget_probe < setup_start
     assert "fail 'apk update failed after WAN recovery'" in source
     assert "failed to install VM guest packages" in source
+
+
+def test_vm_guest_restores_qemu_wan_before_second_setup_and_live_doh():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    helper_start = source.index(
+        "# After apply, WAN is static 192.168.1.2/gw 192.168.1.1 for the real ISP"
+    )
+    helper_end = source.index("\nrun_and_confirm() {", helper_start)
+    helper = source[helper_start:helper_end]
+    assert "restore_qemu_wan_dhcp() {" in helper
+    assert "uci set network.wan.proto='dhcp'" in helper
+    assert "uclient-fetch -O /dev/null https://downloads.openwrt.org/" in helper
+    assert "10.0.2.0/24" in helper
+    assert "10.0.2.2" in helper
+
+    first_setup = source.index("run_and_confirm first")
+    wan_static = source.index(
+        '[ "$(uci -q get network.wan.ipaddr)" = 192.168.1.2 ]', first_setup
+    )
+    restore_before_second = source.index(
+        "restore_qemu_wan_dhcp 'before second installation'", wan_static
+    )
+    second_setup = source.index("run_and_confirm second", restore_before_second)
+    live = source.index('if [ "$profile" = live ]; then', second_setup)
+    restore_before_live = source.index(
+        "restore_qemu_wan_dhcp 'before live DoH'", live
+    )
+    assert first_setup < wan_static < restore_before_second < second_setup
+    assert live < restore_before_live
 
 
 def test_vm_guest_synchronizes_static_wan_before_dot_probe():

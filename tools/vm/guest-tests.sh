@@ -53,6 +53,11 @@ fail() {
         cat /tmp/vm-test-failure-detail >&2 2>&1 || :
         printf '%s\n' '--- end failure detail ---' >&2
     fi
+    if [ -s /tmp/debug-3aae.log ]; then
+        printf '%s\n' '--- debug-3aae ---' >&2
+        cat /tmp/debug-3aae.log >&2 2>&1 || :
+        printf '%s\n' '--- end debug-3aae ---' >&2
+    fi
     printf 'vm-test: %s\n' "$failure" >&2
     exit 1
 }
@@ -314,7 +319,9 @@ apk_ready=0
 apk_attempt=0
 while [ "$apk_attempt" -lt 15 ]; do
     apk_attempt=$((apk_attempt + 1))
-    if apk update >/tmp/vm-test-apk-update 2>&1; then
+    if apk update >/tmp/vm-test-apk-update 2>&1 &&
+        uclient-fetch -O /dev/null https://downloads.openwrt.org/ \
+            >/tmp/vm-test-wget-probe 2>&1; then
         apk_ready=1
         break
     fi
@@ -325,6 +332,8 @@ if [ "$apk_ready" != 1 ]; then
         printf 'apk update failed after %s attempts\n' "$apk_attempt"
         printf '%s\n' '--- apk update output ---'
         cat /tmp/vm-test-apk-update 2>&1 || :
+        printf '%s\n' '--- wget probe ---'
+        cat /tmp/vm-test-wget-probe 2>&1 || :
         printf '%s\n' '--- WAN status ---'
         ifstatus wan || :
         printf '%s\n' '--- resolv.conf.auto ---'
@@ -349,7 +358,99 @@ export VPN_ADDR='10.10.0.1/24'
 export VPN_PUB="$client_public"
 export VPN_PSK="$preshared"
 
+# After apply, WAN is static 192.168.1.2/gw 192.168.1.1 for the real ISP
+# double-NAT topology. QEMU user-net still places eth0 on 10.0.2.0/24 with
+# gateway 10.0.2.2, so that static address has no egress. Restore DHCP on eth0
+# before apk/DoH steps that need downloads.openwrt.org or public resolvers.
+# The next setup apply re-pins the static WAN from uci/network.
+restore_qemu_wan_dhcp() {
+    phase=$1
+    printf 'vm-test: restore_qemu_wan_dhcp (%s) wan_proto=%s ip=%s gateway=%s\n' \
+        "$phase" \
+        "$(uci -q get network.wan.proto || :)" \
+        "$(uci -q get network.wan.ipaddr || :)" \
+        "$(uci -q get network.wan.gateway || :)" >&2
+    {
+        printf '{"sessionId":"3aae","hypothesisId":"H1","location":"guest-tests.sh:restore_qemu_wan_dhcp","message":"before restore","data":{'
+        printf '"phase":"%s","wan_proto":"%s","wan_ip":"%s","wan_gateway":"%s"' \
+            "$phase" \
+            "$(uci -q get network.wan.proto || :)" \
+            "$(uci -q get network.wan.ipaddr || :)" \
+            "$(uci -q get network.wan.gateway || :)"
+        printf '},"timestamp":%s}\n' "$(date +%s)000"
+    } >>/tmp/debug-3aae.log 2>/dev/null || :
+    uci set network.wan.device='eth0'
+    uci set network.wan.proto='dhcp'
+    uci -q delete network.wan.ipaddr
+    uci -q delete network.wan.netmask
+    uci -q delete network.wan.gateway
+    uci commit network
+    /etc/init.d/network restart || fail "failed to restore QEMU DHCP WAN ($phase)"
+    uplink_ready=0
+    uplink_attempt=0
+    while [ "$uplink_attempt" -lt 30 ]; do
+        uplink_attempt=$((uplink_attempt + 1))
+        if ifstatus wan | grep -q '"up": true' &&
+            ifstatus wan | grep -q '"ipv4-address"'; then
+            uplink_ready=1
+            break
+        fi
+        sleep 1
+    done
+    [ "$uplink_ready" = 1 ] || fail "QEMU DHCP WAN did not recover ($phase)"
+    /etc/init.d/firewall restart || fail "failed to reapply firewall after QEMU DHCP WAN ($phase)"
+    # Require a real HTTPS fetch. apk update can exit 0 on stale indexes even
+    # when QEMU user-net egress is still broken.
+    apk_ready=0
+    apk_attempt=0
+    while [ "$apk_attempt" -lt 15 ]; do
+        apk_attempt=$((apk_attempt + 1))
+        if apk update >/tmp/vm-test-apk-update 2>&1 &&
+            uclient-fetch -O /dev/null https://downloads.openwrt.org/ \
+                >/tmp/vm-test-wget-probe 2>&1; then
+            apk_ready=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$apk_ready" != 1 ]; then
+        {
+            printf 'QEMU DHCP WAN apk probe failed after %s attempts (%s)\n' "$apk_attempt" "$phase"
+            printf '%s\n' '--- apk update output ---'
+            cat /tmp/vm-test-apk-update 2>&1 || :
+            printf '%s\n' '--- wget probe ---'
+            cat /tmp/vm-test-wget-probe 2>&1 || :
+            printf '%s\n' '--- WAN status ---'
+            ifstatus wan || :
+            printf '%s\n' '--- ip route ---'
+            ip -4 route || :
+        } >/tmp/vm-test-failure-detail 2>&1 || :
+        fail "QEMU DHCP WAN apk probe failed ($phase)"
+    fi
+    printf 'vm-test: restore_qemu_wan_dhcp (%s) ready eth0=%s\n' \
+        "$phase" \
+        "$(ip -4 -o addr show dev eth0 | awk '{print $4; exit}' || :)" >&2
+    {
+        printf '{"sessionId":"3aae","hypothesisId":"H1","location":"guest-tests.sh:restore_qemu_wan_dhcp","message":"after restore","data":{'
+        printf '"phase":"%s","wan_proto":"%s","ipv4":"%s"' \
+            "$phase" \
+            "$(uci -q get network.wan.proto || :)" \
+            "$(ip -4 -o addr show dev eth0 | awk '{print $4; exit}' || :)"
+        printf '},"timestamp":%s}\n' "$(date +%s)000"
+    } >>/tmp/debug-3aae.log 2>/dev/null || :
+}
+
 run_and_confirm() {
+    setup_pass=${1:-unnamed}
+    {
+        printf '{"sessionId":"3aae","hypothesisId":"H1","location":"guest-tests.sh:run_and_confirm","message":"setup start","data":{'
+        printf '"pass":"%s","wan_proto":"%s","wan_ip":"%s","wan_gateway":"%s"' \
+            "$setup_pass" \
+            "$(uci -q get network.wan.proto || :)" \
+            "$(uci -q get network.wan.ipaddr || :)" \
+            "$(uci -q get network.wan.gateway || :)"
+        printf '},"timestamp":%s}\n' "$(date +%s)000"
+    } >>/tmp/debug-3aae.log 2>/dev/null || :
     ./setup.sh --recovery-ready >/tmp/setup.log 2>&1 &
     setup_pid=$!
     pending=
@@ -364,7 +465,12 @@ run_and_confirm() {
             setup_status=0
             wait "$setup_pid" || setup_status=$?
             {
+                printf 'setup pass: %s\n' "$setup_pass"
                 printf 'setup pid exited with status: %s\n' "$setup_status"
+                printf '%s\n' '--- WAN UCI ---'
+                uci -q show network.wan || :
+                printf '%s\n' '--- ip route ---'
+                ip -4 route || :
                 printf '%s\n' '--- setup log ---'
                 if [ -s /tmp/setup.log ]; then
                     tail -n 200 /tmp/setup.log
@@ -406,12 +512,16 @@ run_and_confirm() {
     LAST_TX=$transaction
 }
 
-run_and_confirm
+run_and_confirm first
 check_ap_interfaces 'after first installation'
 export_normalized_uci >/tmp/first.export
 fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get network.lan || :)" = '' ] || fail 'stock LAN survived migration'
 [ "$(uci -q get network.wan6 || :)" = '' ] || fail 'wan6 survived migration'
+[ "$(uci -q get network.wan.proto)" = static ] || fail 'WAN was not pinned static'
+[ "$(uci -q get network.wan.ipaddr)" = 192.168.1.2 ] || fail 'WAN address was not set to 192.168.1.2'
+[ "$(uci -q get network.wan.netmask)" = 255.255.255.0 ] || fail 'WAN netmask was not set'
+[ "$(uci -q get network.wan.gateway)" = 192.168.1.1 ] || fail 'WAN gateway was not set to 192.168.1.1'
 [ "$(uci -q get firewall.wan.network)" = wan ] || fail 'WAN zone was not normalized'
 [ "$(uci -q get firewall.defaults.flow_offloading)" = 1 ] || fail 'software flow offloading is not enabled'
 [ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
@@ -429,7 +539,10 @@ uci -q get firewall.pixeliot_dhcp_reply.dest | grep -qx pixeliot || fail 'missin
 uci -q get firewall.pixeliot_dhcp_reply.src_port | grep -qx 67 || fail 'invalid IoT DHCP reply source port'
 uci -q get firewall.pixeliot_dhcp_reply.dest_port | grep -qx 68 || fail 'invalid IoT DHCP reply destination port'
 
-run_and_confirm
+# Second setup still runs apk update/add. Reattach eth0 to QEMU user-net DHCP
+# so those installs can reach the OpenWrt mirror; apply re-pins static WAN.
+restore_qemu_wan_dhcp 'before second installation'
+run_and_confirm second
 check_ap_interfaces 'after second installation'
 export_normalized_uci >/tmp/second.export
 if ! cmp -s /tmp/first.export /tmp/second.export; then
@@ -452,6 +565,8 @@ check_doh_listeners 'after early-boot recovery'
 check_ap_interfaces 'after early-boot recovery'
 
 if [ "$profile" = live ]; then
+    # Rollback leaves the applied static ISP WAN, which has no QEMU egress.
+    restore_qemu_wan_dhcp 'before live DoH'
     /etc/init.d/https-dns-proxy restart
     sleep 5
     for port in 5053 5054 5055 5056; do
