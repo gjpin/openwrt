@@ -319,8 +319,11 @@ apk_ready=0
 apk_attempt=0
 while [ "$apk_attempt" -lt 15 ]; do
     apk_attempt=$((apk_attempt + 1))
-    if apk update >/tmp/vm-test-apk-update 2>&1 &&
-        uclient-fetch -O /dev/null https://downloads.openwrt.org/ \
+    printf 'vm-test: WAN apk probe attempt %s/15\n' "$apk_attempt" >&2
+    # -T keeps a blackholed HTTPS probe from hanging the suite for minutes.
+    if ping -c 1 -W 2 10.0.2.2 >/tmp/vm-test-ping-probe 2>&1 &&
+        apk update >/tmp/vm-test-apk-update 2>&1 &&
+        uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
             >/tmp/vm-test-wget-probe 2>&1; then
         apk_ready=1
         break
@@ -330,6 +333,8 @@ done
 if [ "$apk_ready" != 1 ]; then
     {
         printf 'apk update failed after %s attempts\n' "$apk_attempt"
+        printf '%s\n' '--- ping probe ---'
+        cat /tmp/vm-test-ping-probe 2>&1 || :
         printf '%s\n' '--- apk update output ---'
         cat /tmp/vm-test-apk-update 2>&1 || :
         printf '%s\n' '--- wget probe ---'
@@ -338,6 +343,8 @@ if [ "$apk_ready" != 1 ]; then
         ifstatus wan || :
         printf '%s\n' '--- resolv.conf.auto ---'
         cat /tmp/resolv.conf.d/resolv.conf.auto 2>&1 || :
+        printf '%s\n' '--- ip route ---'
+        ip -4 route || :
     } >/tmp/vm-test-failure-detail 2>&1 || :
     fail 'apk update failed after WAN recovery'
 fi
@@ -400,13 +407,17 @@ restore_qemu_wan_dhcp() {
     [ "$uplink_ready" = 1 ] || fail "QEMU DHCP WAN did not recover ($phase)"
     /etc/init.d/firewall restart || fail "failed to reapply firewall after QEMU DHCP WAN ($phase)"
     # Require a real HTTPS fetch. apk update can exit 0 on stale indexes even
-    # when QEMU user-net egress is still broken.
+    # when QEMU user-net egress is still broken. Bound wget so a blackhole
+    # cannot stall the suite.
     apk_ready=0
     apk_attempt=0
     while [ "$apk_attempt" -lt 15 ]; do
         apk_attempt=$((apk_attempt + 1))
-        if apk update >/tmp/vm-test-apk-update 2>&1 &&
-            uclient-fetch -O /dev/null https://downloads.openwrt.org/ \
+        printf 'vm-test: restore_qemu_wan_dhcp (%s) apk probe %s/15\n' \
+            "$phase" "$apk_attempt" >&2
+        if ping -c 1 -W 2 10.0.2.2 >/tmp/vm-test-ping-probe 2>&1 &&
+            apk update >/tmp/vm-test-apk-update 2>&1 &&
+            uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
                 >/tmp/vm-test-wget-probe 2>&1; then
             apk_ready=1
             break
@@ -416,6 +427,8 @@ restore_qemu_wan_dhcp() {
     if [ "$apk_ready" != 1 ]; then
         {
             printf 'QEMU DHCP WAN apk probe failed after %s attempts (%s)\n' "$apk_attempt" "$phase"
+            printf '%s\n' '--- ping probe ---'
+            cat /tmp/vm-test-ping-probe 2>&1 || :
             printf '%s\n' '--- apk update output ---'
             cat /tmp/vm-test-apk-update 2>&1 || :
             printf '%s\n' '--- wget probe ---'
