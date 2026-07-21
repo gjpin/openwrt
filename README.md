@@ -13,6 +13,8 @@ confirmed within five minutes.
 - HTTPS DNS proxy upstreams with DNS bypass controls
 - DNS-based ad and tracker blocking
 - An IPv4-only WireGuard server attached to the trusted Pixel zone
+- Static IPv4 WAN behind an ISP router (`192.168.1.2/24`, gateway
+  `192.168.1.1`), with managed VLANs on `192.168.8`–`11.0/24` (double NAT)
 - IPv4-only WAN and managed VLANs, with IPv6 delegation and advertisements disabled
 - Checksummed backups, candidate validation, and timed/early-boot rollback
 
@@ -28,14 +30,17 @@ Ambiguous or customized base sections are rejected before package installation.
 
 Do not run this on a router with a different port or radio layout. Applying the
 network, firewall, and wireless changes can disconnect every remote session.
-First make an off-router configuration backup and verify a recovery path through
-local Ethernet or serial. `setup.sh` must run on the target router as `root`; do
-not run it on a workstation.
+After apply, management access moves to the Pixel gateway `192.168.8.1` (stock
+OpenWrt LAN `192.168.1.1` is removed). First make an off-router configuration
+backup and verify a recovery path through local Ethernet or serial. `setup.sh`
+must run on the target router as `root`; do not run it on a workstation.
 
 ## Run on the OpenWrt router
 
-1. Open two local or recovery-capable sessions to the router. In the first,
-   create a backup:
+1. Open two local or recovery-capable sessions to the router. Before apply,
+   `ROUTER_ADDRESS` is typically the stock LAN address (`192.168.1.1`). After
+   apply, use the Pixel gateway (`192.168.8.1`) for management and confirmation.
+   In the first session, create a backup:
 
    ```sh
    ssh root@ROUTER_ADDRESS

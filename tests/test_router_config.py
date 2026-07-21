@@ -325,6 +325,15 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert candidate["br_lan"]["stp"] == "1"
     assert candidate["unrelated"] == {".type": "interface", "proto": "none"}
     assert set(name for name in candidate if name == "pixel") == {"pixel"}
+    assert candidate["wan"]["proto"] == "static"
+    assert candidate["wan"]["ipaddr"] == "192.168.1.2"
+    assert candidate["wan"]["netmask"] == "255.255.255.0"
+    assert candidate["wan"]["gateway"] == "192.168.1.1"
+    assert candidate["wan"]["ipv6"] == "0"
+    assert candidate["pixel"]["ipaddr"] == "192.168.8.1"
+    assert candidate["pixelguest"]["ipaddr"] == "192.168.9.1"
+    assert candidate["pixeliot"]["ipaddr"] == "192.168.10.1"
+    assert candidate["pixelthings"]["ipaddr"] == "192.168.11.1"
     assert "pixel-secret-123" not in result.stdout + result.stderr
     assert (backups / transaction).stat().st_mode & 0o777 == 0o700
     transaction_dir = backups / transaction
@@ -611,7 +620,9 @@ def test_apply_confirm_and_manual_rollback(router):
     assert "confirm" in stdout
     assert "reboot after confirm" in stdout
     assert "reboot required for WED" in confirm.stdout
-    assert json.loads((config / "network").read_text())["pixel"]["ipaddr"] == "192.168.1.1"
+    assert json.loads((config / "network").read_text())["pixel"]["ipaddr"] == "192.168.8.1"
+    assert json.loads((config / "network").read_text())["wan"]["ipaddr"] == "192.168.1.2"
+    assert json.loads((config / "network").read_text())["wan"]["gateway"] == "192.168.1.1"
     assert json.loads((config / "firewall").read_text())["defaults"]["flow_offloading"] == "1"
     assert json.loads((config / "firewall").read_text())["defaults"]["flow_offloading_hw"] == "1"
     assert modules_conf.read_text().count("options mt7915e wed_enable=Y") == 1

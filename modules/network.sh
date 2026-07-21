@@ -149,6 +149,10 @@ network_module_validate() {
     ! uci_get "$candidate_dir" network.lan >/dev/null 2>&1 || die 'obsolete LAN interface is still configured'
     ! uci_get "$candidate_dir" dhcp.lan >/dev/null 2>&1 || die 'obsolete LAN DHCP pool is still configured'
     ! uci_get "$candidate_dir" network.globals.ula_prefix >/dev/null 2>&1 || die 'IPv6 ULA prefix is still configured'
+    [ "$(uci_get "$candidate_dir" network.wan.proto)" = static ] || die 'WAN must use a static address'
+    [ "$(uci_get "$candidate_dir" network.wan.ipaddr)" = 192.168.1.2 ] || die 'WAN address must be 192.168.1.2'
+    [ "$(uci_get "$candidate_dir" network.wan.netmask)" = 255.255.255.0 ] || die 'WAN netmask must be 255.255.255.0'
+    [ "$(uci_get "$candidate_dir" network.wan.gateway)" = 192.168.1.1 ] || die 'WAN gateway must be 192.168.1.1'
     [ "$(uci_get "$candidate_dir" network.wan.ipv6)" = 0 ] || die 'IPv6 is not disabled on WAN'
     for section_name in pixel pixelthings pixelguest pixeliot; do
         [ "$(uci_get "$candidate_dir" "network.$section_name")" = interface ] || die "missing network.$section_name"
@@ -161,5 +165,14 @@ network_module_validate() {
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name.ra")" = disabled ] || die "IPv6 router advertisements are not disabled for $section_name"
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name.dhcpv6")" = disabled ] || die "DHCPv6 is not disabled for $section_name"
         [ "$(uci_get "$candidate_dir" "dhcp.$section_name.ndp")" = disabled ] || die "NDP proxying is not disabled for $section_name"
+        [ "$(uci_get "$candidate_dir" "network.$section_name.netmask")" = 255.255.255.0 ] ||
+            die "unexpected netmask for $section_name"
     done
+    [ "$(uci_get "$candidate_dir" network.pixel.ipaddr)" = 192.168.8.1 ] || die 'pixel address must be 192.168.8.1'
+    [ "$(uci_get "$candidate_dir" network.pixelguest.ipaddr)" = 192.168.9.1 ] ||
+        die 'pixelguest address must be 192.168.9.1'
+    [ "$(uci_get "$candidate_dir" network.pixeliot.ipaddr)" = 192.168.10.1 ] ||
+        die 'pixeliot address must be 192.168.10.1'
+    [ "$(uci_get "$candidate_dir" network.pixelthings.ipaddr)" = 192.168.11.1 ] ||
+        die 'pixelthings address must be 192.168.11.1'
 }

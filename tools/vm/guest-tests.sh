@@ -574,10 +574,10 @@ pixel_address=$(ip -n pixel1 -o -4 address show dev peer1 | awk '{ sub(/\/.*/, "
 guest_address=$(ip -n guest -o -4 address show dev guest0 | awk '{ sub(/\/.*/, "", $4); print $4 }')
 ip netns exec pixel1 ping -c 1 -W 2 "$guest_address" >/dev/null || fail 'Pixel cannot reach Guest client'
 ! ip netns exec guest ping -c 1 -W 2 "$pixel_address" >/dev/null 2>&1 || fail 'Guest reached Pixel client'
-ip netns exec pixel1 ping -c 1 -W 2 192.168.2.1 >/dev/null || fail 'Pixel cannot reach Guest gateway'
-! ip netns exec guest ping -c 1 -W 2 192.168.1.1 >/dev/null 2>&1 || fail 'Guest reached Pixel gateway'
-! ip netns exec iot ping -c 1 -W 2 192.168.1.1 >/dev/null 2>&1 || fail 'IoT reached Pixel gateway'
-! ip netns exec things ping -c 1 -W 2 192.168.1.1 >/dev/null 2>&1 || fail 'Things reached Pixel gateway'
+ip netns exec pixel1 ping -c 1 -W 2 192.168.9.1 >/dev/null || fail 'Pixel cannot reach Guest gateway'
+! ip netns exec guest ping -c 1 -W 2 192.168.8.1 >/dev/null 2>&1 || fail 'Guest reached Pixel gateway'
+! ip netns exec iot ping -c 1 -W 2 192.168.8.1 >/dev/null 2>&1 || fail 'IoT reached Pixel gateway'
+! ip netns exec things ping -c 1 -W 2 192.168.8.1 >/dev/null 2>&1 || fail 'Things reached Pixel gateway'
 
 # A local deterministic answer proves that queries sent to a nonexistent
 # external resolver are intercepted at port 53.

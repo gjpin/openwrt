@@ -1,6 +1,10 @@
 # Feature overlay: managed VLANs and their DHCP pools.
 # This is applied to an existing OpenWrt configuration, not installed directly.
 
+set network.wan.proto='static'
+set network.wan.ipaddr='192.168.1.2'
+set network.wan.netmask='255.255.255.0'
+set network.wan.gateway='192.168.1.1'
 set network.wan.ipv6='0'
 delete network.wan6
 delete network.globals.ula_prefix
@@ -50,7 +54,7 @@ delete network.pixel
 set network.pixel='interface'
 set network.pixel.device='br-lan.1'
 set network.pixel.proto='static'
-set network.pixel.ipaddr='192.168.1.1'
+set network.pixel.ipaddr='192.168.8.1'
 set network.pixel.netmask='255.255.255.0'
 set network.pixel.delegate='0'
 
@@ -58,7 +62,7 @@ delete network.pixelthings
 set network.pixelthings='interface'
 set network.pixelthings.device='br-lan.4'
 set network.pixelthings.proto='static'
-set network.pixelthings.ipaddr='192.168.4.1'
+set network.pixelthings.ipaddr='192.168.11.1'
 set network.pixelthings.netmask='255.255.255.0'
 set network.pixelthings.delegate='0'
 
@@ -66,7 +70,7 @@ delete network.pixelguest
 set network.pixelguest='interface'
 set network.pixelguest.device='br-lan.2'
 set network.pixelguest.proto='static'
-set network.pixelguest.ipaddr='192.168.2.1'
+set network.pixelguest.ipaddr='192.168.9.1'
 set network.pixelguest.netmask='255.255.255.0'
 set network.pixelguest.delegate='0'
 
@@ -74,7 +78,7 @@ delete network.pixeliot
 set network.pixeliot='interface'
 set network.pixeliot.device='br-lan.3'
 set network.pixeliot.proto='static'
-set network.pixeliot.ipaddr='192.168.3.1'
+set network.pixeliot.ipaddr='192.168.10.1'
 set network.pixeliot.netmask='255.255.255.0'
 set network.pixeliot.delegate='0'
 

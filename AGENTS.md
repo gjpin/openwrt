@@ -78,6 +78,12 @@ path over direct remote replacement of live config files.
 
 - Keep network names aligned across overlays and modules. Current VLAN
   interfaces are `pixel`, `pixelguest`, `pixeliot`, and `pixelthings`.
+- Pin addressing as one change: static WAN `192.168.1.2/24` with gateway
+  `192.168.1.1` (ISP router LAN), and managed VLANs `pixel` `192.168.8.1/24`,
+  `pixelguest` `192.168.9.1/24`, `pixeliot` `192.168.10.1/24`, and
+  `pixelthings` `192.168.11.1/24`. This is double NAT behind the ISP router;
+  inbound WireGuard needs an ISP port forward to `192.168.1.2` for `VPN_PORT`.
+  Keep `VPN_ADDR` off the WAN and managed VLAN subnets.
 - Keep VLAN IDs, bridge-VLAN ports, subnets, wireless `network` values,
   firewall zones, forwarding, and DNS divert rules consistent as one change.
 - Every VLAN must have an explicit DHCP decision. Managed pools live in
@@ -96,8 +102,14 @@ path over direct remote replacement of live config files.
 - WAN and managed VLANs are IPv4-only. Do not reintroduce IPv6 delegation, RA,
   DHCPv6, NDP, `wan6`, or ULA unless that is an intentional, tested change.
 - Overlays update an existing stock configuration. Checked-in `uci/network` has
-  no loopback, globals, or WAN sections; checked-in `uci/firewall` has no
+  no loopback or globals sections and does not create `network.wan`; it pins
+  WAN addressing on the stock section. Checked-in `uci/firewall` has no
   defaults or WAN zone. Do not present overlays as safe full replacements.
+  Stock-base preflight still expects fresh OpenWrt `network.lan` at
+  `192.168.1.1` before migration; that is not the managed `pixel` subnet
+  (`192.168.8.1`). Do not “fix” the stock LAN preflight to `192.168.8.1`.
+  Apply WAN and VLAN renumbering together; do not leave live WAN on
+  `192.168.1.2` while stock LAN remains `192.168.1.1`.
 - Target hardware expectations are device-specific: DSA ports `lan1` through
   `lan5`, `br-lan`, and exactly one `2g` plus one `5g` `wifi-device`. Do not
   generalize without target evidence. Preflight rejects customized or ambiguous
