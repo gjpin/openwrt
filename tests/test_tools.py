@@ -294,8 +294,11 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
         < dot_probe
     )
     assert "ip netns exec guest busybox nc" not in source
-    assert "PixelGuest-Reject-DoT packets before:" in source
-    assert "PixelGuest-Reject-DoT packets after:" in source
+    assert "uci -q delete network.wan.gateway" in source
+    assert "guest_dot_counter() {" in source
+    assert "nft list chain inet fw4 forward_pixelguest" in source
+    assert "Guest TCP/853 reject packets before:" in source
+    assert "Guest TCP/853 reject packets after:" in source
     assert "--- DoT probe output ---" in source
 
 

@@ -701,6 +701,8 @@ uci set network.wan.device='vmwan'
 uci set network.wan.proto='static'
 uci set network.wan.ipaddr='198.18.0.1'
 uci set network.wan.netmask='255.255.255.0'
+# Drop the production ISP gateway; the isolated WireGuard/DoT peer is on-link.
+uci -q delete network.wan.gateway
 uci commit network
 /etc/init.d/network restart || fail 'failed to restart network for static VM WAN'
 vm_wan_ready=0
@@ -758,19 +760,32 @@ if [ "$wan_probe_ready" != 1 ]; then
 fi
 ! ip netns exec iot ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1 || fail 'IoT reached WAN'
 /etc/init.d/firewall reload || fail 'firewall reload failed after static VM WAN activation'
-dot_before=$(nft list ruleset | sed -n '/PixelGuest-Reject-DoT/s/.*counter packets \([0-9][0-9]*\).*/\1/p' | head -n 1)
-[ -n "$dot_before" ] || fail 'DoT rule has no nftables counter'
+# Count every Guest TCP/853 forward reject. adblock-fast force_dns injects its
+# own DoT drop ahead of the named PixelGuest-Reject-DoT rule, so a successful
+# blocklist load shadows the named counter while still rejecting DoT.
+guest_dot_counter() {
+    nft list chain inet fw4 forward_pixelguest 2>/dev/null |
+        sed -n 's/.*tcp dport 853 counter packets \([0-9][0-9]*\).*/\1/p' |
+        awk '{ total += $1 } END { print total + 0 }'
+}
+dot_before=$(guest_dot_counter)
+dot_rule_count=$(
+    nft list chain inet fw4 forward_pixelguest 2>/dev/null |
+        grep -c 'tcp dport 853' || :
+)
+[ "$dot_rule_count" -ge 1 ] || fail 'DoT rule has no nftables counter'
 # bind-dig is installed above and +tcp guarantees a TCP connection attempt.
 # Do not rely on the image's optional BusyBox nc applet for this assertion.
 ip netns exec guest dig +tcp +time=1 +tries=1 \
     @198.18.0.2 -p 853 vm.test A >/tmp/vm-test-dot-probe 2>&1 || :
-dot_after=$(nft list ruleset | sed -n '/PixelGuest-Reject-DoT/s/.*counter packets \([0-9][0-9]*\).*/\1/p' | head -n 1)
-if [ -z "$dot_after" ] || [ "$dot_after" -le "$dot_before" ]; then
+dot_after=$(guest_dot_counter)
+if [ "$dot_after" -le "$dot_before" ]; then
     {
-        printf 'PixelGuest-Reject-DoT packets before: %s\n' "$dot_before"
-        printf 'PixelGuest-Reject-DoT packets after: %s\n' "${dot_after:-missing}"
-        printf '%s\n' '--- PixelGuest DoT nftables rule ---'
-        nft list ruleset | sed -n '/PixelGuest-Reject-DoT/p' || :
+        printf 'Guest TCP/853 reject packets before: %s\n' "$dot_before"
+        printf 'Guest TCP/853 reject packets after: %s\n' "$dot_after"
+        printf '%s\n' '--- PixelGuest forward DoT nftables rules ---'
+        nft list chain inet fw4 forward_pixelguest |
+            sed -n '/tcp dport 853/p' || :
         printf '%s\n' '--- WAN status ---'
         ifstatus wan || :
         printf '%s\n' '--- Guest routes ---'
