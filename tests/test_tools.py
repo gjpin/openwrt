@@ -214,10 +214,19 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
     )
     apk_gate = source.index("apk update >/tmp/vm-test-apk-update", firewall_restart)
     wget_probe = source.index(
-        "uclient-fetch -O /dev/null https://downloads.openwrt.org/", apk_gate
+        "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/", apk_gate
     )
+    ping_probe = source.index("ping -c 1 -W 2 10.0.2.2", firewall_restart)
     setup_start = source.index("run_and_confirm() {", wget_probe)
-    assert network_restart < wan_ready < firewall_restart < apk_gate < wget_probe < setup_start
+    assert (
+        network_restart
+        < wan_ready
+        < firewall_restart
+        < ping_probe
+        < apk_gate
+        < wget_probe
+        < setup_start
+    )
     assert "fail 'apk update failed after WAN recovery'" in source
     assert "failed to install VM guest packages" in source
 
@@ -231,7 +240,8 @@ def test_vm_guest_restores_qemu_wan_before_second_setup_and_live_doh():
     helper = source[helper_start:helper_end]
     assert "restore_qemu_wan_dhcp() {" in helper
     assert "uci set network.wan.proto='dhcp'" in helper
-    assert "uclient-fetch -O /dev/null https://downloads.openwrt.org/" in helper
+    assert "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/" in helper
+    assert "ping -c 1 -W 2 10.0.2.2" in helper
     assert "10.0.2.0/24" in helper
     assert "10.0.2.2" in helper
 
