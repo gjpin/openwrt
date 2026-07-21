@@ -3,7 +3,13 @@
 # adblock-fast package installation and transaction callbacks.
 
 adblock_fast_install() {
-    apk add adblock-fast luci-app-adblock-fast
+    attempt=0
+    while [ "$attempt" -lt 5 ]; do
+        attempt=$((attempt + 1))
+        apk add adblock-fast luci-app-adblock-fast && break
+        [ "$attempt" -lt 5 ] || die 'failed to install adblock-fast packages'
+        sleep $((attempt * 2))
+    done
     adblock_init=${ROUTER_CONFIG_ADBLOCK_INIT:-/etc/init.d/adblock-fast}
     "$adblock_init" enable
 }

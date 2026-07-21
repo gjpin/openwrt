@@ -91,8 +91,27 @@ def test_vm_guest_repeats_failure_reason_after_verbose_diagnostics():
     assert fail_body.count("printf 'vm-test: %s\\n'") == 2
     assert fail_body.rindex("printf 'vm-test: %s\\n'") > fail_body.index("logread")
     assert "tail -n 200 /tmp/setup.log" in fail_body
-    assert fail_body.index("tail -n 200 /tmp/setup.log") > fail_body.index("logread")
+    # Compact setup/failure diagnostics come after noisy logread so CI tails still
+    # show the setup failure reason when logread dominates the serial buffer.
+    assert fail_body.index("--- transaction lock ---") < fail_body.index("logread")
+    assert fail_body.index("logread") < fail_body.index("tail -n 200 /tmp/setup.log")
+    assert fail_body.index("tail -n 200 /tmp/setup.log") < fail_body.rindex(
+        "printf 'vm-test: %s\\n'"
+    )
+    assert "(empty or missing)" in fail_body
 
+
+def test_vm_guest_captures_setup_log_on_early_exit():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    helper_start = source.index("run_and_confirm() {")
+    helper = source[helper_start : source.index("\n}", helper_start)]
+    assert "fail 'setup exited before pending state'" in helper
+    assert "setup pid exited with status:" in helper
+    assert helper.index("setup pid exited with status:") < helper.index(
+        "fail 'setup exited before pending state'"
+    )
+    assert ">/tmp/vm-test-failure-detail" in helper
+    assert "(empty or missing)" in helper
 
 def test_vm_guest_reports_redacted_idempotence_diff_after_verbose_diagnostics():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
@@ -122,8 +141,11 @@ def test_vm_guest_waits_for_apply_to_release_lock_before_confirming():
     helper = source[helper_start : source.index("\n}", helper_start)]
     pending = helper.index("setup did not create a pending transaction")
     unlocked = helper.index("[ ! -d /var/lock/router-config.lock ]")
+    applied = helper.index("candidate applied; confirm")
     confirm = helper.index('/usr/libexec/router-config confirm "$transaction"')
     assert pending < unlocked < confirm
+    assert pending < applied < confirm
+    assert "900" in helper
 
 
 def test_vm_guest_checks_doh_listeners_across_rollback_phases():
@@ -169,7 +191,7 @@ def test_vm_guest_checks_ap_readiness_across_apply_and_rollback_phases():
     assert "check_ap_interfaces 'after manual rollback'" in source
     assert "check_ap_interfaces 'after early-boot recovery'" in source
     helper_start = source.index("check_ap_interfaces() {")
-    helper_end = source.index("\napk update", helper_start)
+    helper_end = source.index("\napk_boot_attempt=0", helper_start)
     helper = source[helper_start:helper_end]
     assert 'awk \'$1 == "type" && $2 == "AP"' in helper
     assert "uci show wireless | sed '/\\.key=/d'" in helper
@@ -179,14 +201,33 @@ def test_vm_guest_checks_ap_readiness_across_apply_and_rollback_phases():
     assert "-printf" not in helper
 
 
+def test_vm_guest_waits_for_apk_after_wan_recovery():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    network_restart = source.index(
+        "/etc/init.d/network restart || fail "
+        "'failed to restart netifd after installing wifi-scripts'"
+    )
+    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', network_restart)
+    firewall_restart = source.index(
+        "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
+        wan_ready,
+    )
+    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", firewall_restart)
+    setup_start = source.index("run_and_confirm() {", apk_gate)
+    assert network_restart < wan_ready < firewall_restart < apk_gate < setup_start
+    assert "fail 'apk update failed after WAN recovery'" in source
+    assert "failed to install VM guest packages" in source
+
+
 def test_vm_guest_synchronizes_static_wan_before_dot_probe():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     network_restart = source.index(
         "/etc/init.d/network restart || fail 'failed to restart network for static VM WAN'"
     )
     wan_ready = source.index('grep -q \'"l3_device": "vmwan"\'', network_restart)
+    probe_retry = source.index('while [ "$wan_probe_attempt" -lt 30 ]; do', wan_ready)
     connectivity_probe = source.index(
-        'ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2', wan_ready
+        'ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2', probe_retry
     )
     firewall_reload = source.index(
         "/etc/init.d/firewall reload || fail "
@@ -196,11 +237,30 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
     dot_probe = source.index(
         "ip netns exec guest dig +tcp +time=1 +tries=1", firewall_reload
     )
-    assert network_restart < wan_ready < connectivity_probe < firewall_reload < dot_probe
+    assert (
+        network_restart
+        < wan_ready
+        < probe_retry
+        < connectivity_probe
+        < firewall_reload
+        < dot_probe
+    )
     assert "ip netns exec guest busybox nc" not in source
     assert "PixelGuest-Reject-DoT packets before:" in source
     assert "PixelGuest-Reject-DoT packets after:" in source
     assert "--- DoT probe output ---" in source
+
+
+def test_vm_guest_live_blocklist_check_avoids_full_redownload():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    live_start = source.index('if [ "$profile" = live ]; then')
+    live = source[live_start : source.index("\nfi\n", live_start)]
+    assert "/var/run/adblock-fast/dnsmasq.servers" in live
+    assert "adblock-fast dnsmasq.servers missing after live setup" in live
+    assert "adblock-fast dnsmasq.servers too small:" in live
+    assert "uclient-fetch \"$url\" -O /dev/null" not in live
+    assert "blocklist unavailable:" not in live
+    assert "/tmp/vm-test-blocklist-urls" in live
 
 
 def test_vm_guest_uses_diagnostics_for_pre_confirmation_failures():
@@ -214,6 +274,9 @@ def test_vm_guest_uses_diagnostics_for_pre_confirmation_failures():
         "fail 'transaction confirmation failed'"
     ) in helper
     assert "--- transaction state ---" in source
+    assert "--- transaction lock ---" in source
+    assert "ls -la /var/lock/router-config.lock" in source
+    assert "pid file: missing" in source
 
 
 def test_imagebuilder_gate_matches_every_installer_package():
@@ -228,9 +291,15 @@ def test_imagebuilder_gate_matches_every_installer_package():
 
 def test_ci_uses_vm_and_native_imagebuilder_without_container_engines():
     workflow = (REPO / ".github/workflows/test.yml").read_text()
+    assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
+    assert "pull_request:" not in workflow
+    assert "schedule:" not in workflow
     assert "run-vm-tests.py --profile stable" in workflow
     assert "run-vm-tests.py --profile live" in workflow
     assert "check-imagebuilder.py" in workflow
+    assert "pip install -r requirements-dev.txt" in workflow
+    assert (REPO / "requirements-dev.txt").read_text().strip().startswith("pytest==")
     assert "docker" not in workflow.lower()
     assert "podman" not in workflow.lower()
 

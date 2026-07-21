@@ -10,6 +10,26 @@ cd "$(dirname "$0")/../.."
 fail() {
     failure=$*
     printf 'vm-test: %s\n' "$failure" >&2
+    printf '%s\n' '--- transaction lock ---' >&2
+    if [ -e /var/lock/router-config.lock ]; then
+        ls -la /var/lock/router-config.lock >&2 2>&1 || :
+        if [ -d /var/lock/router-config.lock ]; then
+            ls -la /var/lock/router-config.lock/ >&2 2>&1 || :
+            if [ -r /var/lock/router-config.lock/pid ]; then
+                printf 'pid file: ' >&2
+                sed -n '1p' /var/lock/router-config.lock/pid >&2 2>&1 || :
+            else
+                printf '%s\n' 'pid file: missing' >&2
+            fi
+        fi
+    else
+        printf '%s\n' 'lock path absent' >&2
+    fi
+    printf '%s\n' '--- end transaction lock ---' >&2
+    printf '%s\n' '--- transaction state ---' >&2
+    find /root/router-config-backups -mindepth 2 -maxdepth 2 \
+        \( -name state -o -name pending \) -print -exec sed -n '1p' {} \; >&2 2>&1 || :
+    printf '%s\n' '--- end transaction state ---' >&2
     for package in network firewall wireless; do
         uci export "$package" 2>&1 | sed -e '/private_key/d' -e '/preshared_key/d' -e '/option key /d' >&2 || :
     done
@@ -18,16 +38,16 @@ fail() {
     for service in network firewall sysntpd https-dns-proxy dnsmasq adblock-fast; do
         "/etc/init.d/$service" status >&2 2>&1 || :
     done
-    printf '%s\n' '--- transaction state ---' >&2
-    find /root/router-config-backups -mindepth 2 -maxdepth 2 \
-        \( -name state -o -name pending \) -print -exec sed -n '1p' {} \; >&2 2>&1 || :
-    printf '%s\n' '--- end transaction state ---' >&2
     logread >&2 2>&1 || :
+    # Emit compact, high-signal diagnostics after logread so CI's truncated
+    # serial/error tails still include the setup failure reason.
+    printf '%s\n' '--- setup log ---' >&2
     if [ -s /tmp/setup.log ]; then
-        printf '%s\n' '--- setup log ---' >&2
         tail -n 200 /tmp/setup.log >&2 2>&1 || :
-        printf '%s\n' '--- end setup log ---' >&2
+    else
+        printf '%s\n' '(empty or missing)' >&2
     fi
+    printf '%s\n' '--- end setup log ---' >&2
     if [ -s /tmp/vm-test-failure-detail ]; then
         printf '%s\n' '--- failure detail ---' >&2
         cat /tmp/vm-test-failure-detail >&2 2>&1 || :
@@ -108,9 +128,17 @@ check_ap_interfaces() {
     fail "$wifi_phase: expected four AP interfaces, found $ap_count"
 }
 
-apk update
-apk add diffutils ip-full kmod-veth kmod-nft-bridge tcpdump bind-dig \
-    kmod-mac80211-hwsim iw-full wifi-scripts wpad-mesh-mbedtls wireguard-tools
+# QEMU user-net HTTPS to downloads.openwrt.org is flaky; retry the guest bootstrap.
+apk_boot_attempt=0
+while [ "$apk_boot_attempt" -lt 5 ]; do
+    apk_boot_attempt=$((apk_boot_attempt + 1))
+    apk update &&
+        apk add diffutils ip-full kmod-veth kmod-nft-bridge tcpdump bind-dig \
+            kmod-mac80211-hwsim iw-full wifi-scripts wpad-mesh-mbedtls wireguard-tools &&
+        break
+    [ "$apk_boot_attempt" -lt 5 ] || fail 'failed to install VM guest packages'
+    sleep $((apk_boot_attempt * 2))
+done
 # The base image starts wpad-basic before this suite replaces it. The wpad ACL
 # is also installed after ubusd loaded its startup ACL set, so a daemon jailed
 # as user network cannot publish its global ubus objects in this disposable VM.
@@ -276,6 +304,34 @@ while [ "$uplink_attempt" -lt 30 ]; do
     sleep 1
 done
 [ "$uplink_ready" = 1 ] || fail 'WAN did not recover after restarting netifd'
+# Apply the seeded firewall explicitly. netifd can mark WAN up before fw4 has
+# reloaded from the stock overlay, and apk's wget then fails with EPERM
+# ("Operation not permitted") against downloads.openwrt.org.
+/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'
+# Wait until apk can refresh indexes. QEMU user-net plus DNS/firewall hotplug
+# can still flake briefly after WAN is up; setup.sh needs a working mirror.
+apk_ready=0
+apk_attempt=0
+while [ "$apk_attempt" -lt 15 ]; do
+    apk_attempt=$((apk_attempt + 1))
+    if apk update >/tmp/vm-test-apk-update 2>&1; then
+        apk_ready=1
+        break
+    fi
+    sleep 2
+done
+if [ "$apk_ready" != 1 ]; then
+    {
+        printf 'apk update failed after %s attempts\n' "$apk_attempt"
+        printf '%s\n' '--- apk update output ---'
+        cat /tmp/vm-test-apk-update 2>&1 || :
+        printf '%s\n' '--- WAN status ---'
+        ifstatus wan || :
+        printf '%s\n' '--- resolv.conf.auto ---'
+        cat /tmp/resolv.conf.d/resolv.conf.auto 2>&1 || :
+    } >/tmp/vm-test-failure-detail 2>&1 || :
+    fail 'apk update failed after WAN recovery'
+fi
 
 server_private=$(wg genkey)
 server_public=$(printf '%s' "$server_private" | wg pubkey)
@@ -298,28 +354,46 @@ run_and_confirm() {
     setup_pid=$!
     pending=
     attempts=0
-    while [ "$attempts" -lt 180 ]; do
+    # Package install plus apply/reload (especially adblock-fast) can exceed three
+    # minutes on the emulated AArch64 CI VM, so wait well beyond that.
+    while [ "$attempts" -lt 900 ]; do
         attempts=$((attempts + 1))
         pending=$(find /root/router-config-backups -name pending -type f 2>/dev/null | sort | tail -n 1)
         [ -z "$pending" ] || break
         kill -0 "$setup_pid" 2>/dev/null || {
-            wait "$setup_pid" || :
+            setup_status=0
+            wait "$setup_pid" || setup_status=$?
+            {
+                printf 'setup pid exited with status: %s\n' "$setup_status"
+                printf '%s\n' '--- setup log ---'
+                if [ -s /tmp/setup.log ]; then
+                    tail -n 200 /tmp/setup.log
+                else
+                    printf '%s\n' '(empty or missing)'
+                fi
+            } >/tmp/vm-test-failure-detail 2>&1 || :
             fail 'setup exited before pending state'
         }
         sleep 1
     done
     [ -n "$pending" ] || fail 'setup did not create a pending transaction'
     attempts=0
-    while [ -d /var/lock/router-config.lock ] && [ "$attempts" -lt 180 ]; do
+    while [ "$attempts" -lt 900 ]; do
         attempts=$((attempts + 1))
         [ -f "$pending" ] || fail 'pending transaction disappeared before confirmation'
         kill -0 "$setup_pid" 2>/dev/null || {
             wait "$setup_pid" || :
             fail 'setup exited before releasing the transaction lock'
         }
+        if [ ! -d /var/lock/router-config.lock ] &&
+            grep -q 'candidate applied; confirm' /tmp/setup.log 2>/dev/null; then
+            break
+        fi
         sleep 1
     done
     [ ! -d /var/lock/router-config.lock ] || fail 'setup did not release the transaction lock'
+    grep -q 'candidate applied; confirm' /tmp/setup.log 2>/dev/null ||
+        fail 'setup did not report that the candidate was applied'
     transaction=${pending%/pending}
     transaction=${transaction##*/}
     [ -f "$pending" ] || fail 'pending transaction disappeared before confirmation'
@@ -379,9 +453,23 @@ if [ "$profile" = live ]; then
         dig +time=10 +tries=1 @127.0.0.1 -p "$port" openwrt.org A | grep -q 'status: NOERROR' ||
             fail "live DoH query failed on $port"
     done
-    uci show adblock-fast | sed -n "s/.*\.url='\(.*\)'/\1/p" | while IFS= read -r url; do
-        uclient-fetch "$url" -O /dev/null || fail "blocklist unavailable: $url"
-    done
+    # Do not re-download multi-megabyte blocklists here. Setup already fetched
+    # them, and once dnsmasq.servers is active a source host that appears in any
+    # list (or a slow QEMU user-net transfer) makes uclient-fetch fail spuriously.
+    [ -s /var/run/adblock-fast/dnsmasq.servers ] ||
+        fail 'adblock-fast dnsmasq.servers missing after live setup'
+    blocklist_lines=$(wc -l </var/run/adblock-fast/dnsmasq.servers)
+    [ "$blocklist_lines" -gt 1000 ] ||
+        fail "adblock-fast dnsmasq.servers too small: $blocklist_lines lines"
+    uci show adblock-fast | sed -n "s/.*\.url='\(.*\)'/\1/p" >/tmp/vm-test-blocklist-urls
+    [ -s /tmp/vm-test-blocklist-urls ] || fail 'no adblock-fast source URLs configured'
+    while IFS= read -r url; do
+        [ -n "$url" ] || continue
+        case "$url" in
+            https://* | http://*) ;;
+            *) fail "adblock-fast source is not an http(s) URL: $url" ;;
+        esac
+    done </tmp/vm-test-blocklist-urls
 fi
 
 # Associate one isolated WPA3-SAE hwsim station with each managed SSID and
@@ -565,14 +653,44 @@ if [ "$vm_wan_ready" != 1 ]; then
     cp /tmp/vm-test-wan-status /tmp/vm-test-failure-detail 2>/dev/null || :
     fail 'static VM WAN did not become ready'
 fi
-for namespace in pixel1 guest things; do
-    ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2 >/dev/null || fail "$namespace cannot reach WAN"
+# netifd marks WAN up before fw4 has retargeted masquerade onto vmwan. Retry
+# LAN->WAN probes first so the async firewall hotplug from the WAN device swap
+# can finish. Reload only after connectivity works, so DoT nftables counters are
+# not replaced mid-assertion by a late hotplug reload.
+wan_probe_ready=0
+wan_probe_attempt=0
+wan_probe_failed=
+while [ "$wan_probe_attempt" -lt 30 ]; do
+    wan_probe_attempt=$((wan_probe_attempt + 1))
+    wan_probe_ready=1
+    wan_probe_failed=
+    for namespace in pixel1 guest things; do
+        if ! ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1; then
+            wan_probe_ready=0
+            wan_probe_failed=$namespace
+            break
+        fi
+    done
+    [ "$wan_probe_ready" = 1 ] && break
+    sleep 1
 done
+if [ "$wan_probe_ready" != 1 ]; then
+    {
+        printf 'WAN probes failed after %s attempts (first failure: %s)\n' \
+            "$wan_probe_attempt" "${wan_probe_failed:-unknown}"
+        printf '%s\n' '--- WAN status ---'
+        ifstatus wan || :
+        printf '%s\n' '--- client routes ---'
+        for namespace in pixel1 guest things; do
+            printf 'namespace %s:\n' "$namespace"
+            ip -n "$namespace" route || :
+        done
+        printf '%s\n' '--- nft masq / wan ---'
+        nft list ruleset | sed -n '/masq\|vmwan\|oifname/p' || :
+    } >/tmp/vm-test-failure-detail 2>&1 || :
+    fail "$wan_probe_failed cannot reach WAN"
+fi
 ! ip netns exec iot ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1 || fail 'IoT reached WAN'
-# Reload only after netifd has published the replacement WAN and the connectivity
-# probes have allowed its asynchronous firewall hotplug event to finish. Reloading
-# immediately after network restart can replace nftables counters during the DoT
-# assertion below.
 /etc/init.d/firewall reload || fail 'firewall reload failed after static VM WAN activation'
 dot_before=$(nft list ruleset | sed -n '/PixelGuest-Reject-DoT/s/.*counter packets \([0-9][0-9]*\).*/\1/p' | head -n 1)
 [ -n "$dot_before" ] || fail 'DoT rule has no nftables counter'

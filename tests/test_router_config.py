@@ -519,6 +519,33 @@ def test_placeholder_and_lock_are_rejected(router):
     assert "another operation holds" in result.stderr
 
 
+def test_stale_empty_lock_dir_is_cleared(router):
+    _, _, backups, _, env = router
+    lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
+    lock.mkdir()
+    assert lock.is_dir()
+    assert not (lock / "pid").exists()
+    result, transaction = prepare(env)
+    assert result.returncode == 0
+    assert transaction
+    assert backups.exists()
+    assert not lock.exists()
+
+
+def test_stale_dead_pid_lock_is_cleared(router):
+    _, _, backups, _, env = router
+    lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
+    lock.mkdir()
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    (lock / "pid").write_text(f"{dead.pid}\n")
+    result, transaction = prepare(env)
+    assert result.returncode == 0
+    assert transaction
+    assert backups.exists()
+    assert not lock.exists()
+
+
 def test_missing_transaction_module_is_rejected(router):
     root, _, backups, _, env = router
     (root / "modules" / "firewall.sh").unlink()
