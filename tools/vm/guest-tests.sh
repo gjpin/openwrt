@@ -308,8 +308,10 @@ done
 # reloaded from the stock overlay, and apk's wget then fails with EPERM
 # ("Operation not permitted") against downloads.openwrt.org.
 /etc/init.d/firewall restart || fail 'failed to apply seeded firewall'
-# Wait until the QEMU uplink can reach the OpenWrt mirror. Probe with ping plus
-# a bounded HTTPS fetch first; only then run apk update so retries stay cheap.
+# Wait until the QEMU uplink can reach the OpenWrt mirror, then refresh apk
+# indexes. Probe with ping plus a bounded HTTPS fetch first so retries stay
+# cheap; apk update itself is retried because parallel index fetches still hit
+# transient wget EPERM after netifd/fw4 reloads.
 egress_ready=0
 egress_attempt=0
 while [ "$egress_attempt" -lt 15 ]; do
@@ -323,9 +325,23 @@ while [ "$egress_attempt" -lt 15 ]; do
     fi
     sleep 2
 done
-if [ "$egress_ready" != 1 ] || ! apk update >/tmp/vm-test-apk-update 2>&1; then
+apk_ready=0
+apk_attempt=0
+if [ "$egress_ready" = 1 ]; then
+    while [ "$apk_attempt" -lt 5 ]; do
+        apk_attempt=$((apk_attempt + 1))
+        printf 'vm-test: WAN apk update attempt %s/5\n' "$apk_attempt" >&2
+        if apk update >/tmp/vm-test-apk-update 2>&1; then
+            apk_ready=1
+            break
+        fi
+        sleep $((apk_attempt * 2))
+    done
+fi
+if [ "$apk_ready" != 1 ]; then
     {
-        printf 'apk update failed after %s egress probe attempts\n' "$egress_attempt"
+        printf 'apk update failed after %s egress / %s apk attempts\n' \
+            "$egress_attempt" "$apk_attempt"
         printf '%s\n' '--- ping probe ---'
         cat /tmp/vm-test-ping-probe 2>&1 || :
         printf '%s\n' '--- wget probe ---'
@@ -390,7 +406,8 @@ restore_qemu_wan_dhcp() {
     done
     [ "$uplink_ready" = 1 ] || fail "QEMU DHCP WAN did not recover ($phase)"
     /etc/init.d/firewall restart || fail "failed to reapply firewall after QEMU DHCP WAN ($phase)"
-    # Cheap connectivity probes first; one apk update after egress works.
+    # Cheap connectivity probes first; retry apk update after egress works
+    # because parallel index fetches still see transient wget EPERM.
     egress_ready=0
     egress_attempt=0
     while [ "$egress_attempt" -lt 15 ]; do
@@ -405,10 +422,24 @@ restore_qemu_wan_dhcp() {
         fi
         sleep 2
     done
-    if [ "$egress_ready" != 1 ] || ! apk update >/tmp/vm-test-apk-update 2>&1; then
+    apk_ready=0
+    apk_attempt=0
+    if [ "$egress_ready" = 1 ]; then
+        while [ "$apk_attempt" -lt 5 ]; do
+            apk_attempt=$((apk_attempt + 1))
+            printf 'vm-test: restore_qemu_wan_dhcp (%s) apk update %s/5\n' \
+                "$phase" "$apk_attempt" >&2
+            if apk update >/tmp/vm-test-apk-update 2>&1; then
+                apk_ready=1
+                break
+            fi
+            sleep $((apk_attempt * 2))
+        done
+    fi
+    if [ "$apk_ready" != 1 ]; then
         {
-            printf 'QEMU DHCP WAN egress probe failed after %s attempts (%s)\n' \
-                "$egress_attempt" "$phase"
+            printf 'QEMU DHCP WAN apk failed after %s egress / %s apk attempts (%s)\n' \
+                "$egress_attempt" "$apk_attempt" "$phase"
             printf '%s\n' '--- ping probe ---'
             cat /tmp/vm-test-ping-probe 2>&1 || :
             printf '%s\n' '--- wget probe ---'
