@@ -47,6 +47,11 @@ def test_vm_initramfs_does_not_mount_acceptance_disk_as_root():
     disk_root = vm.qemu_command("qemu", Path("kernel"), Path("disk"), True)
     assert initramfs[initramfs.index("-append") + 1] == "console=ttyAMA0,115200n8"
     assert disk_root[disk_root.index("-append") + 1].startswith("root=/dev/vda rootwait ")
+    netdev = disk_root[disk_root.index("-netdev") + 1]
+    assert "net=192.168.1.0/24" in netdev
+    assert "host=192.168.1.1" in netdev
+    assert "dhcpstart=192.168.1.2" in netdev
+    assert "dns=192.168.1.3" in netdev
 
 
 def test_vm_guest_avoids_builtin_and_virtual_package_names():
@@ -207,12 +212,15 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         "/etc/init.d/network restart || fail "
         "'failed to restart netifd after installing wifi-scripts'"
     )
-    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', network_restart)
+    lan_down = source.index(
+        "ifdown lan || fail 'failed to release overlapping stock LAN'", network_restart
+    )
+    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', lan_down)
     firewall_restart = source.index(
         "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
         wan_ready,
     )
-    ping_probe = source.index("ping -c 1 -W 2 10.0.2.2", firewall_restart)
+    ping_probe = source.index("ping -c 1 -W 2 192.168.1.1", firewall_restart)
     wget_probe = source.index(
         "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/", ping_probe
     )
@@ -221,6 +229,7 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
     setup_start = source.index("run_and_confirm() {", apk_retries)
     assert (
         network_restart
+        < lan_down
         < wan_ready
         < firewall_restart
         < ping_probe
@@ -233,35 +242,17 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
     assert "failed to install VM guest packages" in source
 
 
-def test_vm_guest_restores_qemu_wan_before_second_setup_and_live_doh():
+def test_vm_guest_keeps_production_wan_for_second_setup_and_live_doh():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
-    helper_start = source.index(
-        "# After apply, WAN is static 192.168.1.2/gw 192.168.1.1 for the real ISP"
-    )
-    helper_end = source.index("\nrun_and_confirm() {", helper_start)
-    helper = source[helper_start:helper_end]
-    assert "restore_qemu_wan_dhcp() {" in helper
-    assert "uci set network.wan.proto='dhcp'" in helper
-    assert "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/" in helper
-    assert "ping -c 1 -W 2 10.0.2.2" in helper
-    assert "10.0.2.0/24" in helper
-    assert "10.0.2.2" in helper
-    assert "debug-3aae" not in helper
-
     first_setup = source.index("run_and_confirm first")
     wan_static = source.index(
         '[ "$(uci -q get network.wan.ipaddr)" = 192.168.1.2 ]', first_setup
     )
-    restore_before_second = source.index(
-        "restore_qemu_wan_dhcp 'before second installation'", wan_static
-    )
-    second_setup = source.index("run_and_confirm second", restore_before_second)
+    second_setup = source.index("run_and_confirm second", wan_static)
     live = source.index('if [ "$profile" = live ]; then', second_setup)
-    restore_before_live = source.index(
-        "restore_qemu_wan_dhcp 'before live DoH'", live
-    )
-    assert first_setup < wan_static < restore_before_second < second_setup
-    assert live < restore_before_live
+    assert first_setup < wan_static < second_setup < live
+    assert "restore_qemu_wan_dhcp" not in source
+    assert "10.0.2." not in source
 
 
 def test_vm_guest_command_timeout_covers_two_setup_passes():
