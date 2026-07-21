@@ -30,11 +30,6 @@ fail() {
     find /root/router-config-backups -mindepth 2 -maxdepth 2 \
         \( -name state -o -name pending \) -print -exec sed -n '1p' {} \; >&2 2>&1 || :
     printf '%s\n' '--- end transaction state ---' >&2
-    if [ -s /tmp/setup.log ]; then
-        printf '%s\n' '--- setup log ---' >&2
-        tail -n 200 /tmp/setup.log >&2 2>&1 || :
-        printf '%s\n' '--- end setup log ---' >&2
-    fi
     for package in network firewall wireless; do
         uci export "$package" 2>&1 | sed -e '/private_key/d' -e '/preshared_key/d' -e '/option key /d' >&2 || :
     done
@@ -44,6 +39,15 @@ fail() {
         "/etc/init.d/$service" status >&2 2>&1 || :
     done
     logread >&2 2>&1 || :
+    # Emit compact, high-signal diagnostics after logread so CI's truncated
+    # serial/error tails still include the setup failure reason.
+    printf '%s\n' '--- setup log ---' >&2
+    if [ -s /tmp/setup.log ]; then
+        tail -n 200 /tmp/setup.log >&2 2>&1 || :
+    else
+        printf '%s\n' '(empty or missing)' >&2
+    fi
+    printf '%s\n' '--- end setup log ---' >&2
     if [ -s /tmp/vm-test-failure-detail ]; then
         printf '%s\n' '--- failure detail ---' >&2
         cat /tmp/vm-test-failure-detail >&2 2>&1 || :
@@ -321,7 +325,17 @@ run_and_confirm() {
         pending=$(find /root/router-config-backups -name pending -type f 2>/dev/null | sort | tail -n 1)
         [ -z "$pending" ] || break
         kill -0 "$setup_pid" 2>/dev/null || {
-            wait "$setup_pid" || :
+            setup_status=0
+            wait "$setup_pid" || setup_status=$?
+            {
+                printf 'setup pid exited with status: %s\n' "$setup_status"
+                printf '%s\n' '--- setup log ---'
+                if [ -s /tmp/setup.log ]; then
+                    tail -n 200 /tmp/setup.log
+                else
+                    printf '%s\n' '(empty or missing)'
+                fi
+            } >/tmp/vm-test-failure-detail 2>&1 || :
             fail 'setup exited before pending state'
         }
         sleep 1
@@ -603,10 +617,10 @@ if [ "$vm_wan_ready" != 1 ]; then
     cp /tmp/vm-test-wan-status /tmp/vm-test-failure-detail 2>/dev/null || :
     fail 'static VM WAN did not become ready'
 fi
-# netifd marks WAN up before fw4 has retargeted masquerade onto vmwan. Reload
-# once the replacement WAN is published, then retry LAN->WAN probes before any
-# DoT counter snapshot so nftables is stable for the assertion below.
-/etc/init.d/firewall reload || fail 'firewall reload failed after static VM WAN activation'
+# netifd marks WAN up before fw4 has retargeted masquerade onto vmwan. Retry
+# LAN->WAN probes first so the async firewall hotplug from the WAN device swap
+# can finish. Reload only after connectivity works, so DoT nftables counters are
+# not replaced mid-assertion by a late hotplug reload.
 wan_probe_ready=0
 wan_probe_attempt=0
 wan_probe_failed=
@@ -641,6 +655,7 @@ if [ "$wan_probe_ready" != 1 ]; then
     fail "$wan_probe_failed cannot reach WAN"
 fi
 ! ip netns exec iot ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1 || fail 'IoT reached WAN'
+/etc/init.d/firewall reload || fail 'firewall reload failed after static VM WAN activation'
 dot_before=$(nft list ruleset | sed -n '/PixelGuest-Reject-DoT/s/.*counter packets \([0-9][0-9]*\).*/\1/p' | head -n 1)
 [ -n "$dot_before" ] || fail 'DoT rule has no nftables counter'
 # bind-dig is installed above and +tcp guarantees a TCP connection attempt.

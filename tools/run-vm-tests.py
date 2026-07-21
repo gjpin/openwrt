@@ -175,7 +175,7 @@ class SerialConsole:
         tail = self.buffer[start:]
         match = re.search(re.escape(marker) + r"(\d+)", tail)
         if not match or match.group(1) != "0":
-            raise RuntimeError(f"guest command failed: {command}\n{SECRET_RE.sub('<redacted-key>', tail[-4000:])}")
+            raise RuntimeError(f"guest command failed: {command}\n{SECRET_RE.sub('<redacted-key>', tail[-16000:])}")
         return tail[: match.start()]
 
 

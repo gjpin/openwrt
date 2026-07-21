@@ -91,10 +91,27 @@ def test_vm_guest_repeats_failure_reason_after_verbose_diagnostics():
     assert fail_body.count("printf 'vm-test: %s\\n'") == 2
     assert fail_body.rindex("printf 'vm-test: %s\\n'") > fail_body.index("logread")
     assert "tail -n 200 /tmp/setup.log" in fail_body
-    # Lock/setup diagnostics come before noisy logread so CI tails still show them.
-    assert fail_body.index("--- transaction lock ---") < fail_body.index("tail -n 200 /tmp/setup.log")
-    assert fail_body.index("tail -n 200 /tmp/setup.log") < fail_body.index("logread")
+    # Compact setup/failure diagnostics come after noisy logread so CI tails still
+    # show the setup failure reason when logread dominates the serial buffer.
+    assert fail_body.index("--- transaction lock ---") < fail_body.index("logread")
+    assert fail_body.index("logread") < fail_body.index("tail -n 200 /tmp/setup.log")
+    assert fail_body.index("tail -n 200 /tmp/setup.log") < fail_body.rindex(
+        "printf 'vm-test: %s\\n'"
+    )
+    assert "(empty or missing)" in fail_body
 
+
+def test_vm_guest_captures_setup_log_on_early_exit():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    helper_start = source.index("run_and_confirm() {")
+    helper = source[helper_start : source.index("\n}", helper_start)]
+    assert "fail 'setup exited before pending state'" in helper
+    assert "setup pid exited with status:" in helper
+    assert helper.index("setup pid exited with status:") < helper.index(
+        "fail 'setup exited before pending state'"
+    )
+    assert ">/tmp/vm-test-failure-detail" in helper
+    assert "(empty or missing)" in helper
 
 def test_vm_guest_reports_redacted_idempotence_diff_after_verbose_diagnostics():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
@@ -190,24 +207,24 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
         "/etc/init.d/network restart || fail 'failed to restart network for static VM WAN'"
     )
     wan_ready = source.index('grep -q \'"l3_device": "vmwan"\'', network_restart)
+    probe_retry = source.index('while [ "$wan_probe_attempt" -lt 30 ]; do', wan_ready)
+    connectivity_probe = source.index(
+        'ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2', probe_retry
+    )
     firewall_reload = source.index(
         "/etc/init.d/firewall reload || fail "
         "'firewall reload failed after static VM WAN activation'",
-        wan_ready,
+        connectivity_probe,
     )
-    connectivity_probe = source.index(
-        'ip netns exec "$namespace" ping -c 1 -W 2 198.18.0.2', firewall_reload
-    )
-    probe_retry = source.index('while [ "$wan_probe_attempt" -lt 30 ]; do', firewall_reload)
     dot_probe = source.index(
-        "ip netns exec guest dig +tcp +time=1 +tries=1", connectivity_probe
+        "ip netns exec guest dig +tcp +time=1 +tries=1", firewall_reload
     )
     assert (
         network_restart
         < wan_ready
-        < firewall_reload
         < probe_retry
         < connectivity_probe
+        < firewall_reload
         < dot_probe
     )
     assert "ip netns exec guest busybox nc" not in source
