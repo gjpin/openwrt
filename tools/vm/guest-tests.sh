@@ -343,7 +343,7 @@ export THINGS_WIFI_PASSWORD='vm-things-password'
 export GUEST_WIFI_PASSWORD='vm-guest-password'
 export IOT_WIFI_PASSWORD='vm-iot-password'
 export VPN_IF='wgserver'
-export VPN_PORT='51820'
+export VPN_PORT='42451'
 export VPN_KEY="$server_private"
 export VPN_ADDR='10.10.0.1/24'
 export VPN_PUB="$client_public"
@@ -728,7 +728,7 @@ printf '%s\n' "$preshared" >/tmp/client-psk
 chmod 600 /tmp/client-private /tmp/client-psk
 ip netns exec wanclient wg set wgtest private-key /tmp/client-private \
     peer "$server_public" preshared-key /tmp/client-psk allowed-ips 10.10.0.1/32 \
-    endpoint 198.18.0.1:51820
+    endpoint 198.18.0.1:42451
 ip -n wanclient address add 10.10.0.2/24 dev wgtest
 ip -n wanclient link set wgtest up
 ! ip netns exec wanclient ping -c 2 -W 2 10.10.0.1 >/dev/null 2>&1 ||

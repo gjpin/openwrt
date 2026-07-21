@@ -293,7 +293,7 @@ exit 0
         "GUEST_WIFI_PASSWORD": "guest-secret-123",
         "IOT_WIFI_PASSWORD": "iot-secret-123",
         "VPN_IF": "wgserver",
-        "VPN_PORT": "51820",
+        "VPN_PORT": "42451",
         "VPN_KEY": "private-secret",
         "VPN_ADDR": "10.10.0.1/24",
         "VPN_PUB": "public-key",
@@ -844,7 +844,7 @@ def test_setup_validates_all_inputs_before_mutation(router):
     key = "A" * 43 + "="
     env.update({
         "VPN_IF": "bad-name;unsafe",
-        "VPN_PORT": "51820",
+        "VPN_PORT": "42451",
         "VPN_KEY": key,
         "VPN_ADDR": "10.10.0.1/24",
         "VPN_PUB": key,

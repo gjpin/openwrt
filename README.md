@@ -82,7 +82,7 @@ must run on the target router as `root`; do not run it on a workstation.
    export GUEST_WIFI_PASSWORD='replace-me'
    export IOT_WIFI_PASSWORD='replace-me'
    export VPN_IF='wgserver'
-   export VPN_PORT='51820'
+   export VPN_PORT='42451'
    export VPN_KEY='replace-with-server-private-key'
    export VPN_ADDR='10.10.0.1/24'
    export VPN_PUB='replace-with-client-public-key'
