@@ -46,7 +46,7 @@ firewall_classify_base() {
     done
     [ "$firewall_defaults_count" = 1 ] || die 'firewall must contain exactly one defaults section'
     firewall_check_allowed_options "$firewall_config_dir" "$FIREWALL_DEFAULTS_SECTION" \
-        'synflood_protect syn_flood input output forward'
+        'synflood_protect syn_flood input output forward flow_offloading flow_offloading_hw'
     [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_DEFAULTS_SECTION.input")" = REJECT ] ||
         die 'stock firewall defaults input policy was customized'
     [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_DEFAULTS_SECTION.output")" = ACCEPT ] ||
@@ -154,11 +154,20 @@ firewall_module_stage() {
     uci -q -c "$candidate_dir" del_list firewall.wan.network=wan6 2>/dev/null || :
     uci -q -c "$candidate_dir" commit firewall || die 'failed to normalize stock firewall candidate'
     apply_overlay "$candidate_dir" "$overlay_file"
+    uci -q -c "$candidate_dir" set firewall.defaults.flow_offloading='1' ||
+        die 'failed to enable software flow offloading'
+    uci -q -c "$candidate_dir" set firewall.defaults.flow_offloading_hw='1' ||
+        die 'failed to enable hardware flow offloading'
+    uci -q -c "$candidate_dir" commit firewall || die 'failed to serialize flow offloading candidate'
 }
 
 firewall_module_validate() {
     candidate_dir=$1
     [ "$(uci_get "$candidate_dir" firewall.defaults)" = defaults ] || die 'candidate lacks named firewall defaults'
+    [ "$(uci_get "$candidate_dir" firewall.defaults.flow_offloading)" = 1 ] ||
+        die 'candidate lacks software flow offloading'
+    [ "$(uci_get "$candidate_dir" firewall.defaults.flow_offloading_hw)" = 1 ] ||
+        die 'candidate lacks hardware flow offloading'
     [ "$(uci_get "$candidate_dir" firewall.wan)" = zone ] || die 'candidate lacks named firewall WAN zone'
     [ "$(uci_get "$candidate_dir" firewall.wan.network)" = wan ] || die 'candidate WAN zone must contain only wan'
     ! uci -q -c "$candidate_dir" show firewall | grep -Eq "\.network='?wan6'?\$" ||

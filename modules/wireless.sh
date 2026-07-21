@@ -56,6 +56,20 @@ wireless_module_stage() {
     uci -q -c "$candidate_dir" set "wireless.pixelguest.device=$WIRELESS_5G_DEVICE"
     uci -q -c "$candidate_dir" set "wireless.pixeliot.device=$WIRELESS_2G_DEVICE"
     uci -q -c "$candidate_dir" commit wireless || die 'failed to serialize wireless candidate'
+    wireless_stage_wed "$candidate_dir/modules.conf"
+}
+
+wireless_stage_wed() {
+    modules_file=$1
+    [ -f "$modules_file" ] || die "missing modules.conf candidate: $modules_file"
+    staged_file=$modules_file.wed.$$
+    awk '
+        /^[[:space:]]*options[[:space:]]+mt7915e([[:space:]]|$)/ && /wed_enable=/ { next }
+        { print }
+    ' "$modules_file" >"$staged_file" || die 'failed to stage WED modules.conf'
+    printf '%s\n' 'options mt7915e wed_enable=Y' >>"$staged_file" ||
+        die 'failed to append WED modules.conf option'
+    mv -f "$staged_file" "$modules_file" || die 'failed to install WED modules.conf candidate'
 }
 
 wireless_module_validate() {
@@ -71,4 +85,10 @@ wireless_module_validate() {
     done
     [ "$(uci_get "$candidate_dir" wireless.pixeliot.device)" = "$WIRELESS_2G_DEVICE" ] ||
         die 'wireless.pixeliot is not assigned to the 2.4 GHz radio'
+    modules_file=$candidate_dir/modules.conf
+    [ -f "$modules_file" ] || die 'candidate lacks modules.conf'
+    grep -qx 'options mt7915e wed_enable=Y' "$modules_file" ||
+        die 'candidate modules.conf lacks WED enablement'
+    wed_lines=$(grep -c 'wed_enable=' "$modules_file" || :)
+    [ "$wed_lines" = 1 ] || die 'candidate modules.conf has duplicate WED options'
 }

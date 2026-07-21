@@ -413,6 +413,11 @@ fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get network.lan || :)" = '' ] || fail 'stock LAN survived migration'
 [ "$(uci -q get network.wan6 || :)" = '' ] || fail 'wan6 survived migration'
 [ "$(uci -q get firewall.wan.network)" = wan ] || fail 'WAN zone was not normalized'
+[ "$(uci -q get firewall.defaults.flow_offloading)" = 1 ] || fail 'software flow offloading is not enabled'
+[ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
+grep -qx 'options mt7915e wed_enable=Y' /etc/modules.conf || fail 'WED is not enabled in modules.conf'
+wed_count=$(grep -c 'wed_enable=' /etc/modules.conf || :)
+[ "$wed_count" = 1 ] || fail 'modules.conf has duplicate WED options'
 for port in lan1 lan2 lan3 lan4 lan5; do
     uci -q get network.br_lan.ports | tr ' ' '\n' | grep -qx "$port" || fail "$port is absent from bridge"
 done

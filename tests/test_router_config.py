@@ -174,7 +174,9 @@ def router():
     init = tmp_path / "init.d" / "router-config-rollback"
     overlays = tmp_path / "overlays"
     modules = tmp_path / "modules"
+    modules_conf = tmp_path / "etc-modules.conf"
     config.mkdir(); bin_dir.mkdir(); overlays.mkdir(); modules.mkdir(); proc_net.mkdir(parents=True)
+    modules_conf.write_text("# test modules.conf\n")
     socket_lines = "".join(
         f"   {index}: 0100007F:{port:04X} 00000000:0000 0A\n"
         for index, port in enumerate((5053, 5054, 5055, 5056, 5999))
@@ -277,6 +279,7 @@ exit 0
         "ROUTER_CONFIG_LIBEXEC": str(runtime),
         "ROUTER_CONFIG_UCI_DIR": str(overlays),
         "ROUTER_CONFIG_MODULE_DIR": str(modules),
+        "ROUTER_CONFIG_MODULES_CONF": str(modules_conf),
         "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
         "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
         "ROUTER_CONFIG_SYSNTPD_INIT": str(services["sysntpd-init"]),
@@ -338,11 +341,17 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["pixelguest"]["device"] == "radio0"
     assert wireless["pixeliot"]["device"] == "radio1"
     firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
+    assert firewall["defaults"]["flow_offloading"] == "1"
+    assert firewall["defaults"]["flow_offloading_hw"] == "1"
     assert firewall["pixeliot_dhcp_reply"] == {
         ".type": "rule", "name": "PixelIoT-DHCP-Reply", "dest": "pixeliot",
         "src_port": "67", "dest_port": "68", "proto": "udp",
         "family": "ipv4", "target": "ACCEPT",
     }
+    modules_conf = (transaction_dir / "candidate" / "modules.conf").read_text()
+    assert modules_conf.count("options mt7915e wed_enable=Y") == 1
+    assert "wed_enable=N" not in modules_conf
+    assert "# test modules.conf" in modules_conf
     assert dhcp["unrelated"]["ignore"] == "1"
     assert dhcp["dnsmasq"]["server"] == [
         "127.0.0.1#5053", "127.0.0.1#5054", "127.0.0.1#5055", "127.0.0.1#5056",
@@ -465,10 +474,30 @@ def test_fresh_stock_base_is_normalized_in_candidate_only(router):
     assert "ula_prefix" not in candidate_network["globals"]
     assert "lan" not in candidate_dhcp
     assert candidate_firewall["defaults"][".type"] == "defaults"
+    assert candidate_firewall["defaults"]["flow_offloading"] == "1"
+    assert candidate_firewall["defaults"]["flow_offloading_hw"] == "1"
     assert candidate_firewall["wan"]["network"] == ["wan"]
     assert "base_lan" not in candidate_firewall and "base_lan_wan" not in candidate_firewall
     assert candidate_firewall["unrelated"]["name"] == "Keep me"
     assert {name: (config / name).read_text() for name in originals} == originals
+    modules_conf = (backups / transaction / "candidate" / "modules.conf").read_text()
+    assert modules_conf.count("options mt7915e wed_enable=Y") == 1
+
+
+def test_wed_modules_conf_is_idempotent(router):
+    _, _, backups, _, env = router
+    modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
+    modules_conf.write_text("# keep\noptions mt7915e wed_enable=N\noptions other ignored=1\n")
+    _, first = prepare(env)
+    first_text = (backups / first / "candidate" / "modules.conf").read_text()
+    assert first_text.count("options mt7915e wed_enable=Y") == 1
+    assert "wed_enable=N" not in first_text
+    assert "options other ignored=1" in first_text
+    modules_conf.write_text(first_text)
+    _, second = prepare(env)
+    second_text = (backups / second / "candidate" / "modules.conf").read_text()
+    assert second_text == first_text
+    assert second_text.count("options mt7915e wed_enable=Y") == 1
 
 
 def test_custom_stock_base_is_rejected_before_backup(router):
@@ -559,6 +588,8 @@ def test_apply_confirm_and_manual_rollback(router):
     _, config, backups, _, env = router
     names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
     originals = {name: (config / name).read_text() for name in names}
+    modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
+    original_modules = modules_conf.read_text()
     _, transaction = prepare(env)
     process = subprocess.Popen(
         [str(REPO / "router-config.sh"), "apply", transaction], env=env,
@@ -574,33 +605,44 @@ def test_apply_confirm_and_manual_rollback(router):
         if not lock.exists(): break
         time.sleep(0.02)
     assert not lock.exists()
-    run_router(env, "confirm", transaction)
+    confirm = run_router(env, "confirm", transaction)
     stdout, stderr = process.communicate(timeout=5)
     assert process.returncode == 0, stderr
     assert "confirm" in stdout
+    assert "reboot after confirm" in stdout
+    assert "reboot required for WED" in confirm.stdout
     assert json.loads((config / "network").read_text())["pixel"]["ipaddr"] == "192.168.1.1"
+    assert json.loads((config / "firewall").read_text())["defaults"]["flow_offloading"] == "1"
+    assert json.loads((config / "firewall").read_text())["defaults"]["flow_offloading_hw"] == "1"
+    assert modules_conf.read_text().count("options mt7915e wed_enable=Y") == 1
     proxy = json.loads((config / "https-dns-proxy").read_text())
     assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
     run_router(env, "rollback", transaction)
     assert {name: (config / name).read_text() for name in originals} == originals
+    assert modules_conf.read_text() == original_modules
 
 
 def test_timeout_and_reboot_recovery_restore_backup(router):
     _, config, backups, _, env = router
     original = (config / "network").read_text()
+    modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
+    original_modules = modules_conf.read_text()
     env["ROUTER_CONFIG_TIMEOUT"] = "0.15"
     _, transaction = prepare(env)
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert (config / "network").read_text() == original
+    assert modules_conf.read_text() == original_modules
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
     _, transaction = prepare(env)
     shutil.copy(backups / transaction / "candidate" / "network", config / "network")
+    shutil.copy(backups / transaction / "candidate" / "modules.conf", modules_conf)
     (backups / transaction / "pending").touch()
     (backups / transaction / "state").write_text("pending\n")
     run_router(env, "_recover-pending")
     assert (config / "network").read_text() == original
+    assert modules_conf.read_text() == original_modules
 
 
 def test_fw4_failure_does_not_change_live_configuration(router):
@@ -746,21 +788,25 @@ def test_partial_candidate_installation_failure_restores_all_packages(router):
     root, config, backups, _, env = router
     names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
     originals = {name: (config / name).read_text() for name in names}
+    modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
+    original_modules = modules_conf.read_text()
     _, transaction = prepare(env)
     fail = root / "install-fail"
     fail.touch()
+    real_cp = next(path for path in ("/bin/cp", "/usr/bin/cp") if Path(path).exists())
     write_executable(root / "bin" / "cp", f'''#!/bin/sh
 if [ -e "{fail}" ]; then
     case "$1" in
         */candidate/firewall) rm -f "{fail}"; exit 1 ;;
     esac
 fi
-exec /usr/bin/cp "$@"
+exec {real_cp} "$@"
 ''')
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert "candidate installation failed" in result.stderr
     assert {name: (config / name).read_text() for name in names} == originals
+    assert modules_conf.read_text() == original_modules
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 

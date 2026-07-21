@@ -21,4 +21,16 @@ with `band '5g'`. It discovers their section names rather than assuming radio
 numbering. Channel, country, and other device settings remain part of the
 router's base configuration.
 
+The same transaction also manages `/etc/modules.conf` for Wireless Ethernet
+Dispatch (WED). The candidate ensures exactly one line:
+
+```
+options mt7915e wed_enable=Y
+```
+
+`modules.conf` is backed up, checksummed, installed, and restored with the UCI
+packages so a reboot while pending rolls it back. WED loads only after a reboot
+**after confirm**; do not reboot while the transaction is still pending. WED
+bypasses AQL on accelerated Wi-Fi traffic.
+
 [Back to the README](../README.md)

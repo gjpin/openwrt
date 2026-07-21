@@ -34,18 +34,22 @@ candidate can disconnect the router and require local recovery.
 
 ## Transaction model
 
-UCI changes are built and applied as one candidate:
+UCI changes are built and applied as one candidate, together with a managed
+`/etc/modules.conf` for Wireless Ethernet Dispatch (WED):
 
 1. `prepare --recovery-ready` copies live UCI into
-   `/root/router-config-backups/<id>/backup` and `candidate`, applies overlays
+   `/root/router-config-backups/<id>/backup` and `candidate`, copies
+   `/etc/modules.conf` (or an empty stand-in) the same way, applies overlays
    to the candidate only, injects secrets into the mode-0600 candidate,
    validates, writes `manifest.sha256`, and installs runtime helpers.
 2. `apply <id>` verifies the manifest, marks the transaction pending, installs
-   the candidate into `/etc/config`, runs `fw4 check`, reloads services, starts
-   a five-minute watchdog, and waits for confirmation.
+   the candidate into `/etc/config` and `/etc/modules.conf`, runs `fw4 check`,
+   reloads services, starts a five-minute watchdog, and waits for confirmation.
 3. `confirm <id>` from a second local/recovery-capable session clears pending
    and keeps the change. Without confirmation, the watchdog restores the
    backup. A reboot with a pending file triggers early-boot recovery.
+   Reboot after confirm for WED (`mt7915e wed_enable`) to load; do not reboot
+   while pending.
 
 Package installation and init-service enablement happen before the protected
 transaction and are not removed by rollback. Prefer this prepare/apply/confirm
@@ -83,6 +87,12 @@ path over direct remote replacement of live config files.
   other VLANs; IoT has no WAN forwarding and rejects general zone output.
   Restricted VLANs allow only explicitly permitted router services (DNS/DHCP),
   plus the IoT DHCP-reply exception.
+- Enable software and hardware flow offloading on `firewall.defaults`
+  (`flow_offloading=1`, `flow_offloading_hw=1`). Keep SQM disabled while this
+  offload policy is in use; do not install or enable SQM.
+- Enable WED with exactly one `options mt7915e wed_enable=Y` line in the
+  managed `/etc/modules.conf` candidate. Reboot only after confirm for WED to
+  load. WED bypasses AQL; do not treat AQL tuning as compatible with WED.
 - WAN and managed VLANs are IPv4-only. Do not reintroduce IPv6 delegation, RA,
   DHCPv6, NDP, `wan6`, or ULA unless that is an intentional, tested change.
 - Overlays update an existing stock configuration. Checked-in `uci/network` has
@@ -114,7 +124,8 @@ path over direct remote replacement of live config files.
   `GUEST_WIFI_PASSWORD`, `IOT_WIFI_PASSWORD`, `VPN_IF`, `VPN_PORT`, `VPN_KEY`,
   `VPN_ADDR`, `VPN_PUB`, and `VPN_PSK`. There is no `VPN_ADDR6`.
 - Keep operations idempotent. Re-running prepare/apply must not append
-  duplicate UCI rules, redirects, list entries, or sections.
+  duplicate UCI rules, redirects, list entries, sections, or `modules.conf`
+  WED option lines.
 - Resolve companion files relative to the script directory, and reject a
   missing or empty repository file before the first mutation.
 - Address named UCI sections directly. Do not rename anonymous stock sections
@@ -163,6 +174,9 @@ uci show network
 uci show firewall
 uci show wireless
 fw4 check
+uci get firewall.defaults.flow_offloading
+uci get firewall.defaults.flow_offloading_hw
+grep -x 'options mt7915e wed_enable=Y' /etc/modules.conf
 uci show https-dns-proxy
 logread -e netifd -e firewall -e https-dns-proxy
 ```
@@ -170,8 +184,10 @@ logread -e netifd -e firewall -e https-dns-proxy
 Confirm from a client in each VLAN that DHCP and DNS work, expected internet
 access works, forbidden inter-VLAN routes remain blocked, and the management
 VLAN can still reach the router. Verify WireGuard handshake and routing
-separately. If a command is unavailable on the target OpenWrt release, report
-that and use the release-appropriate equivalent rather than skipping silently.
+separately. After confirm and reboot, verify WED with
+`cat /sys/module/mt7915e/parameters/wed_enable` (expect `Y`). If a command is
+unavailable on the target OpenWrt release, report that and use the
+release-appropriate equivalent rather than skipping silently.
 
 ## Change scope
 

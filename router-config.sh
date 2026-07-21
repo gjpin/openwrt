@@ -19,6 +19,7 @@ HTTPS_DNS_PROXY_INIT=${ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT:-/etc/init.d/https-dns
 DNSMASQ_INIT=${ROUTER_CONFIG_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
 ADBLOCK_INIT=${ROUTER_CONFIG_ADBLOCK_INIT:-/etc/init.d/adblock-fast}
 PROC_NET_DIR=${ROUTER_CONFIG_PROC_NET_DIR:-/proc/net}
+MODULES_CONF=${ROUTER_CONFIG_MODULES_CONF:-/etc/modules.conf}
 TIMEOUT=${ROUTER_CONFIG_TIMEOUT:-300}
 POLL_INTERVAL=${ROUTER_CONFIG_POLL_INTERVAL:-1}
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -239,6 +240,7 @@ write_manifest() {
     for package_name in $UCI_PACKAGES; do
         manifest_files="$manifest_files backup/$package_name candidate/$package_name"
     done
+    manifest_files="$manifest_files backup/modules.conf candidate/modules.conf"
     # Intentional splitting of the internally constructed relative path list.
     # shellcheck disable=SC2086
     (cd "$transaction_dir" && sha256sum $manifest_files) >"$transaction_dir/manifest.sha256"
@@ -288,6 +290,13 @@ prepare() {
         cp "$CONFIG_DIR/$package_name" "$transaction_dir/backup/$package_name"
         cp "$CONFIG_DIR/$package_name" "$transaction_dir/candidate/$package_name"
     done
+    if [ -f "$MODULES_CONF" ]; then
+        cp "$MODULES_CONF" "$transaction_dir/backup/modules.conf"
+        cp "$MODULES_CONF" "$transaction_dir/candidate/modules.conf"
+    else
+        : >"$transaction_dir/backup/modules.conf"
+        : >"$transaction_dir/candidate/modules.conf"
+    fi
     for overlay_name in network firewall wireless dns-over-https adblock-fast; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
@@ -300,6 +309,7 @@ prepare() {
     dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
     adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
     wireguard_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireguard"
+    chmod 600 "$transaction_dir/candidate/modules.conf"
     validate_candidate "$transaction_dir/candidate"
     write_manifest "$transaction_dir"
     printf '%s\n' prepared >"$transaction_dir/state"
@@ -321,9 +331,20 @@ install_uci_files() {
     done
 }
 
+install_modules_conf() {
+    source_dir=$1
+    modules_parent=${MODULES_CONF%/*}
+    [ "$modules_parent" = "$MODULES_CONF" ] || mkdir -p "$modules_parent" || return 1
+    install_temp=$MODULES_CONF.router-config.$$
+    cp "$source_dir/modules.conf" "$install_temp" || return 1
+    chmod 600 "$install_temp" || return 1
+    mv -f "$install_temp" "$MODULES_CONF" || return 1
+}
+
 install_candidate() {
     candidate_dir=$1
     install_uci_files "$candidate_dir" || return 1
+    install_modules_conf "$candidate_dir" || return 1
 }
 
 https_dns_proxy_listen_ports() {
@@ -421,6 +442,7 @@ reload_services() {
 restore_transaction() {
     transaction_dir=$1
     install_uci_files "$transaction_dir/backup" || die 'CRITICAL: UCI backup restoration failed'
+    install_modules_conf "$transaction_dir/backup" || die 'CRITICAL: modules.conf backup restoration failed'
     if [ "${2-}" != boot ]; then
         reload_services || die 'CRITICAL: backups restored but a service reload failed'
     fi
@@ -494,6 +516,8 @@ apply_transaction() {
 
     info 'candidate applied; confirm from a second local/recovery-capable session with:'
     printf '%s confirm %s\n' "$LIBEXEC" "$transaction_id"
+    info 'software and hardware flow offloading are active after firewall reload'
+    info 'reboot after confirm for Wireless Ethernet Dispatch (WED) to take effect'
     while [ -f "$transaction_dir/pending" ]; do
         sleep "$POLL_INTERVAL"
     done
@@ -529,6 +553,7 @@ confirm_transaction() {
     release_lock
     trap - EXIT HUP INT TERM
     info "confirmed transaction $transaction_id"
+    info 'reboot required for WED (mt7915e wed_enable) to take effect'
 }
 
 rollback_transaction() {
