@@ -90,6 +90,14 @@ wireless_module_validate() {
         key_value=$(uci_get "$candidate_dir" "wireless.$section_name.key") || die "missing Wi-Fi key for $section_name"
         [ -n "$key_value" ] || die "empty Wi-Fi key for $section_name"
     done
+    for section_name in pixelthings pixelguest pixeliot; do
+        [ "$(uci_get "$candidate_dir" "wireless.$section_name.isolate")" = 1 ] ||
+            die "wireless.$section_name.isolate is not set to 1"
+    done
+    case $(uci_get "$candidate_dir" wireless.pixel.isolate 2>/dev/null || :) in
+        '' | 0) ;;
+        *) die 'wireless.pixel.isolate must remain unset or 0' ;;
+    esac
     for section_name in pixel pixelthings pixelguest; do
         [ "$(uci_get "$candidate_dir" "wireless.$section_name.device")" = "$WIRELESS_5G_DEVICE" ] ||
             die "wireless.$section_name is not assigned to the 5 GHz radio"

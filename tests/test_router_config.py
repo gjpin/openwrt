@@ -350,6 +350,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["pixelthings"]["device"] == "radio0"
     assert wireless["pixelguest"]["device"] == "radio0"
     assert wireless["pixeliot"]["device"] == "radio1"
+    assert wireless["pixel"].get("isolate") in (None, "0")
+    assert wireless["pixelthings"]["isolate"] == "1"
+    assert wireless["pixelguest"]["isolate"] == "1"
+    assert wireless["pixeliot"]["isolate"] == "1"
     assert wireless["radio0"]["country"] == "US"
     assert wireless["radio1"]["country"] == "US"
     assert wireless["radio0"]["channel"] == "52"

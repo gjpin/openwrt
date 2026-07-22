@@ -8,6 +8,7 @@ confirmed within five minutes.
 ## Features
 
 - Four WPA3 networks: Pixel, Guest, IoT, and Things
+- AP client isolation on Guest, IoT, and Things (`isolate=1`)
 - 5 GHz DFS on channel `52` at `HE80`
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access

@@ -93,6 +93,10 @@ path over direct remote replacement of live config files.
   other VLANs; IoT has no WAN forwarding and rejects general zone output.
   Restricted VLANs allow only explicitly permitted router services (DNS/DHCP),
   plus the IoT DHCP-reply exception.
+- Keep Wi-Fi client isolation (`wifi-iface.isolate=1`) on Guest, IoT, and
+  Things only; leave Pixel unisolated so trusted stations can talk L2. This is
+  OpenWrt's AP-mode isolate option (hostapd `ap_isolate`), distinct from
+  firewall VLAN isolation.
 - Enable software and hardware flow offloading on `firewall.defaults`
   (`flow_offloading=1`, `flow_offloading_hw=1`). Keep SQM disabled while this
   offload policy is in use; do not install or enable SQM.

@@ -6,12 +6,19 @@ Sources: [`modules/wireless.sh`](../modules/wireless.sh) and
 This module creates four WPA3-SAE access points across the router's 2.4 GHz and
 5 GHz radios:
 
-| SSID | Band | Attached network | Password variable |
-|---|---|---|---|
-| `Pixel` | 5 GHz | `pixel` | `PIXEL_WIFI_PASSWORD` |
-| `PixelGuest` | 5 GHz | `pixelguest` | `GUEST_WIFI_PASSWORD` |
-| `PixelIoT` | 2.4 GHz | `pixeliot` | `IOT_WIFI_PASSWORD` |
-| `PixelThings` | 5 GHz | `pixelthings` | `THINGS_WIFI_PASSWORD` |
+| SSID | Band | Attached network | Password variable | Client isolation |
+|---|---|---|---|---|
+| `Pixel` | 5 GHz | `pixel` | `PIXEL_WIFI_PASSWORD` | off |
+| `PixelGuest` | 5 GHz | `pixelguest` | `GUEST_WIFI_PASSWORD` | on (`isolate=1`) |
+| `PixelIoT` | 2.4 GHz | `pixeliot` | `IOT_WIFI_PASSWORD` | on (`isolate=1`) |
+| `PixelThings` | 5 GHz | `pixelthings` | `THINGS_WIFI_PASSWORD` | on (`isolate=1`) |
+
+Guest, IoT, and Things set OpenWrt's `wifi-iface` option `isolate` to `1`, which
+isolates wireless clients from each other on that AP (hostapd `ap_isolate`; see
+[OpenWrt Wi-Fi /etc/config/wireless](https://openwrt.org/docs/guide-user/network/wifi/basic)).
+Pixel leaves client isolation off so trusted stations can talk L2 to each other.
+This is same-SSID L2 isolation and is separate from the inter-VLAN firewall
+policy in [`docs/firewall.md`](firewall.md).
 
 Passwords must contain 8–63 printable characters. They are injected into the
 mode-0600 transaction candidate and are never stored in the tracked overlay.

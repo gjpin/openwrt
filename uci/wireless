@@ -13,6 +13,7 @@ set wireless.pixelthings.mode='ap'
 set wireless.pixelthings.network='pixelthings'
 set wireless.pixelthings.ssid='PixelThings'
 set wireless.pixelthings.encryption='sae'
+set wireless.pixelthings.isolate='1'
 
 delete wireless.pixelguest
 set wireless.pixelguest='wifi-iface'
@@ -20,6 +21,7 @@ set wireless.pixelguest.mode='ap'
 set wireless.pixelguest.network='pixelguest'
 set wireless.pixelguest.ssid='PixelGuest'
 set wireless.pixelguest.encryption='sae'
+set wireless.pixelguest.isolate='1'
 
 delete wireless.pixeliot
 set wireless.pixeliot='wifi-iface'
@@ -27,3 +29,4 @@ set wireless.pixeliot.mode='ap'
 set wireless.pixeliot.network='pixeliot'
 set wireless.pixeliot.ssid='PixelIoT'
 set wireless.pixeliot.encryption='sae'
+set wireless.pixeliot.isolate='1'
