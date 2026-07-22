@@ -8,6 +8,7 @@ confirmed within five minutes.
 ## Features
 
 - Four WPA3 networks: Pixel, Guest, IoT, and Things
+- 5 GHz DFS on channel `52` at `HE80`
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
 - HTTPS DNS proxy upstreams with DNS bypass controls
@@ -86,12 +87,16 @@ must run on the target router as `root`; do not run it on a workstation.
    # export CHANNEL='52'
    export VPN_IF='wgserver'
    export VPN_PORT='42451'
-   export VPN_KEY='replace-with-server-private-key'
+   export VPN_KEY="$(wg genkey)"
    export VPN_ADDR='10.10.0.1/24'
-   export VPN_PUB='replace-with-client-public-key'
-   export VPN_PSK='replace-with-preshared-key'
+   client_private=$(wg genkey)
+   export VPN_PUB="$(printf '%s' "$client_private" | wg pubkey)"
+   export VPN_PSK="$(wg genpsk)"
    ./setup.sh --recovery-ready
    ```
+
+   Keep `$client_private` for the peer device; only its public key is exported as
+   `VPN_PUB`.
 
 4. Keep the first session open. Test management access, DHCP, DNS, and expected
    internet access from the appropriate VLANs. In the second recovery-capable
