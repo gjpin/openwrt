@@ -178,6 +178,8 @@ firewall_module_validate() {
             die "missing DNS interception for $section_name"
         [ "$(uci_get "$candidate_dir" "firewall.reject_dot_$section_name.src")" = "$section_name" ] ||
             die "missing DoT rejection for $section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.reject_doq_$section_name.src")" = "$section_name" ] ||
+            die "missing DoQ rejection for $section_name"
     done
     [ "$(uci_get "$candidate_dir" firewall.pixeliot_dhcp_reply.dest)" = pixeliot ] ||
         die 'missing outbound IoT DHCP exception'

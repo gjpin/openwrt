@@ -12,7 +12,7 @@ confirmed within five minutes.
 - 5 GHz DFS on channel `52` at `HE80`
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
-- HTTPS DNS proxy upstreams with DNS bypass controls
+- HTTPS DNS proxy upstreams with DNS bypass controls (DoT/DoQ port rejects)
 - Authenticated NTP via `chrony-nts` (NTS), with plain NTP-by-IP cold-boot bootstrap
 - DNS-based ad and tracker blocking
 - An IPv4-only WireGuard server attached to the trusted Pixel zone

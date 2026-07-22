@@ -494,6 +494,7 @@ done
 for net in pixel pixelguest pixeliot pixelthings; do
     uci -q get "firewall.divert_dns_$net.src" | grep -qx "$net" || fail "missing DNS interception for $net"
     uci -q get "firewall.reject_dot_$net.src" | grep -qx "$net" || fail "missing DoT rejection for $net"
+    uci -q get "firewall.reject_doq_$net.src" | grep -qx "$net" || fail "missing DoQ rejection for $net"
 done
 uci -q get firewall.pixeliot_dhcp_reply.dest | grep -qx pixeliot || fail 'missing outbound IoT DHCP exception'
 uci -q get firewall.pixeliot_dhcp_reply.src_port | grep -qx 67 || fail 'invalid IoT DHCP reply source port'
@@ -870,6 +871,38 @@ if [ "$dot_after" -le "$dot_before" ]; then
         cat /tmp/vm-test-dot-probe || :
     } >/tmp/vm-test-failure-detail 2>&1
     fail 'DoT rejection counter did not increase'
+fi
+# Count Guest UDP/8853 forward rejects (DoQ alternate port; RFC DoQ on UDP/853
+# is already covered by the DoT tcp/udp 853 rules above).
+guest_doq_counter() {
+    nft list chain inet fw4 forward_pixelguest 2>/dev/null |
+        sed -n 's/.*udp dport 8853 counter packets \([0-9][0-9]*\).*/\1/p' |
+        awk '{ total += $1 } END { print total + 0 }'
+}
+doq_before=$(guest_doq_counter)
+doq_rule_count=$(
+    nft list chain inet fw4 forward_pixelguest 2>/dev/null |
+        grep -c 'udp dport 8853' || :
+)
+[ "$doq_rule_count" -ge 1 ] || fail 'DoQ rule has no nftables counter'
+ip netns exec guest dig +time=1 +tries=1 \
+    @198.18.0.2 -p 8853 vm.test A >/tmp/vm-test-doq-probe 2>&1 || :
+doq_after=$(guest_doq_counter)
+if [ "$doq_after" -le "$doq_before" ]; then
+    {
+        printf 'Guest UDP/8853 reject packets before: %s\n' "$doq_before"
+        printf 'Guest UDP/8853 reject packets after: %s\n' "$doq_after"
+        printf '%s\n' '--- PixelGuest forward DoQ nftables rules ---'
+        nft list chain inet fw4 forward_pixelguest |
+            sed -n '/udp dport 8853/p' || :
+        printf '%s\n' '--- WAN status ---'
+        ifstatus wan || :
+        printf '%s\n' '--- Guest routes ---'
+        ip -n guest route || :
+        printf '%s\n' '--- DoQ probe output ---'
+        cat /tmp/vm-test-doq-probe || :
+    } >/tmp/vm-test-failure-detail 2>&1
+    fail 'DoQ rejection counter did not increase'
 fi
 uci set firewall.allow_wireguard.enabled='0'
 uci commit firewall

@@ -15,8 +15,12 @@ then makes these coordinated configuration changes:
 - `https-dns-proxy` is prevented from changing dnsmasq or firewall state on
   service start and stop; those settings remain transaction-managed.
 - WAN stops accepting peer-provided DNS servers.
-- Explicit rules for `pixel`, `pixelguest`, `pixelthings`, and `pixeliot`
-  intercept TCP/UDP port 53 and reject direct TCP/UDP DNS-over-TLS on port 853.
+- Explicit
+  [`firewall` rules](https://openwrt.org/docs/guide-user/firewall/firewall_configuration)
+  for `pixel`, `pixelguest`, `pixelthings`, and `pixeliot` intercept TCP/UDP
+  port 53, reject direct TCP/UDP DNS-over-TLS on port 853, and reject
+  DNS-over-QUIC on UDP port 8853. RFC DoQ on UDP/853 is already covered by the
+  DoT reject rules.
 
 Time sync is handled by the [Encrypted NTP (NTS)](nts.md) module, not this
 one. NTS is primary; plain NTP-by-IP bootstrap in chrony still covers cold boot
