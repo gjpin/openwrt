@@ -60,7 +60,7 @@ dns_over_https_validate() {
         expected_forwards="$expected_forwards 127.0.0.1#$listen_port"
     done
     [ "$(uci_get "$candidate_dir" dhcp.dnsmasq.noresolv)" = 1 ] || die 'dnsmasq must ignore resolv.conf'
-    [ "$(uci_get "$candidate_dir" dhcp.dnsmasq.cachesize)" = 4096 ] || die 'dnsmasq cache must contain 4096 entries'
+    [ "$(uci_get "$candidate_dir" dhcp.dnsmasq.cachesize)" = 8192 ] || die 'dnsmasq cache must contain 8192 entries'
     actual_forwards=$(uci_get "$candidate_dir" dhcp.dnsmasq.server) || die 'dnsmasq candidate lacks upstream servers'
     [ " $actual_forwards" = "$expected_forwards" ] ||
         die 'dnsmasq upstreams do not match the four https-dns-proxy instances'

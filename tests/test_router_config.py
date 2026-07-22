@@ -373,7 +373,7 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         "127.0.0.1#5053", "127.0.0.1#5054", "127.0.0.1#5055", "127.0.0.1#5056",
     ]
     assert dhcp["dnsmasq"]["noresolv"] == "1"
-    assert dhcp["dnsmasq"]["cachesize"] == "4096"
+    assert dhcp["dnsmasq"]["cachesize"] == "8192"
     proxy = json.loads((transaction_dir / "candidate" / "https-dns-proxy").read_text())
     assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
     assert proxy["config"] == {

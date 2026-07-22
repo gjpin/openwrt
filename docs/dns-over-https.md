@@ -6,8 +6,10 @@ Sources: [`modules/dns-over-https.sh`](../modules/dns-over-https.sh) and
 This module installs and enables `https-dns-proxy` and its LuCI application,
 then makes these coordinated configuration changes:
 
-- dnsmasq ignores resolv.conf, uses a 4,096-entry cache, and forwards to four
-  local proxy instances on `127.0.0.1` ports 5053 through 5056.
+- dnsmasq ignores resolv.conf, uses an 8,192-entry
+  [`cachesize`](https://openwrt.org/docs/guide-user/base-system/dhcp)
+  (OpenWrt UCI → dnsmasq `-c`), and forwards to four local proxy instances on
+  `127.0.0.1` ports 5053 through 5056.
 - The named Quad9, Cloudflare Security, Control D Ads & Tracking, and Mullvad
   Base instances use the same IPv4 bootstrap list.
 - `https-dns-proxy` is prevented from changing dnsmasq or firewall state on

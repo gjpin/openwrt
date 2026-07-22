@@ -23,7 +23,7 @@ set https-dns-proxy.mullvad_base.listen_port='5056'
 set https-dns-proxy.mullvad_base.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
 
 set dhcp.dnsmasq.noresolv='1'
-set dhcp.dnsmasq.cachesize='4096'
+set dhcp.dnsmasq.cachesize='8192'
 delete dhcp.dnsmasq.server
 add_list dhcp.dnsmasq.server='127.0.0.1#5053'
 add_list dhcp.dnsmasq.server='127.0.0.1#5054'
