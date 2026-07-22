@@ -18,6 +18,11 @@ and 68. IoT also rejects general zone output, with a narrow UDP 67-to-68
 exception so the router can return DHCPv4 offers and acknowledgements; the
 other three zones accept output.
 
+Zone input policy alone is not enough for LuCI/SSH. Stock uhttpd and Dropbear
+listen on all addresses, including restricted-VLAN gateways. The
+[admin access](admin-access.md) module binds those listeners to Pixel
+(`192.168.8.1` / `DirectInterface=pixel`) as defense in depth.
+
 The candidate enables software and hardware flow offloading on the named
 `firewall.defaults` section (`flow_offloading=1` and `flow_offloading_hw=1`).
 These take effect after the firewall reload at apply time. Keep SQM disabled

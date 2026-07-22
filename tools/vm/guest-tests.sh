@@ -717,6 +717,34 @@ ip netns exec pixel1 ping -c 1 -W 2 192.168.9.1 >/dev/null || fail 'Pixel cannot
 ! ip netns exec iot ping -c 1 -W 2 192.168.8.1 >/dev/null 2>&1 || fail 'IoT reached Pixel gateway'
 ! ip netns exec things ping -c 1 -W 2 192.168.8.1 >/dev/null 2>&1 || fail 'Things reached Pixel gateway'
 
+[ "$(uci get uhttpd.main.listen_http)" = '192.168.8.1:80' ] ||
+    fail 'uhttpd HTTP listen is not bound to Pixel'
+[ "$(uci get uhttpd.main.listen_https)" = '192.168.8.1:443' ] ||
+    fail 'uhttpd HTTPS listen is not bound to Pixel'
+[ "$(uci get dropbear.main.DirectInterface)" = pixel ] ||
+    fail 'dropbear DirectInterface is not pixel'
+! uci -q get dropbear.main.Interface >/dev/null || fail 'dropbear Interface must remain unset'
+
+ss -ltn >/tmp/vm-test-admin-listeners 2>&1 || fail 'ss failed while checking admin listeners'
+grep -E '192\.168\.8\.1:80\b' /tmp/vm-test-admin-listeners >/dev/null ||
+    fail 'uhttpd is not listening on 192.168.8.1:80'
+grep -E '192\.168\.8\.1:443\b' /tmp/vm-test-admin-listeners >/dev/null ||
+    fail 'uhttpd is not listening on 192.168.8.1:443'
+! grep -E '192\.168\.(9|10|11)\.1:(22|80|443)\b' /tmp/vm-test-admin-listeners >/dev/null ||
+    fail 'admin service is still listening on a restricted VLAN gateway'
+grep -E '(:22\b|192\.168\.8\.1:22\b)' /tmp/vm-test-admin-listeners >/dev/null ||
+    fail 'dropbear is not listening on port 22'
+
+http_probe() {
+    ip netns exec "$1" wget -q -T 2 -O /dev/null "http://$2/" >/dev/null 2>&1
+}
+
+# Pixel reachability is covered by the 192.168.8.1 ss listeners above.
+# Restricted VLANs must not answer HTTP on their own gateway addresses.
+! http_probe guest 192.168.9.1 || fail 'Guest reached LuCI HTTP on its own gateway'
+! http_probe iot 192.168.10.1 || fail 'IoT reached LuCI HTTP on its own gateway'
+! http_probe things 192.168.11.1 || fail 'Things reached LuCI HTTP on its own gateway'
+
 # A local deterministic answer proves that queries sent to a nonexistent
 # external resolver are intercepted at port 53.
 uci -q del_list dhcp.dnsmasq.address='/vm.test/203.0.113.7' 2>/dev/null || :

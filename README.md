@@ -12,6 +12,7 @@ confirmed within five minutes.
 - 5 GHz DFS on channel `52` at `HE80`
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
+- LuCI and SSH bound to the Pixel gateway only (`192.168.8.1` / `pixel`)
 - HTTPS DNS proxy upstreams with DNS bypass controls (DoT/DoQ port rejects)
 - Authenticated NTP via `chrony-nts` (NTS), with plain NTP-by-IP cold-boot bootstrap
 - DNS-based ad and tracker blocking
@@ -34,7 +35,9 @@ Ambiguous or customized base sections are rejected before package installation.
 Do not run this on a router with a different port or radio layout. Applying the
 network, firewall, and wireless changes can disconnect every remote session.
 After apply, management access moves to the Pixel gateway `192.168.8.1` (stock
-OpenWrt LAN `192.168.1.1` is removed). First make an off-router configuration
+OpenWrt LAN `192.168.1.1` is removed). LuCI and SSH listen only on that Pixel
+address/interface; Guest, IoT, and Things cannot reach them on their own
+gateways. First make an off-router configuration
 backup and verify a recovery path through local Ethernet or serial. `setup.sh`
 must run on the target router as `root`; do not run it on a workstation.
 
@@ -173,6 +176,7 @@ the transaction helper. They are not standalone commands.
 - [Network and DHCP](docs/network.md)
 - [Firewall](docs/firewall.md)
 - [Wireless](docs/wireless.md)
+- [Admin access](docs/admin-access.md)
 - [Encrypted NTP (NTS)](docs/nts.md)
 - [Encrypted DNS](docs/dns-over-https.md)
 - [Ad blocking](docs/adblock-fast.md)

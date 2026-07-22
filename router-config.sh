@@ -14,6 +14,8 @@ INIT_SCRIPT=${ROUTER_CONFIG_INIT_SCRIPT:-/etc/init.d/router-config-rollback}
 LIBEXEC=${ROUTER_CONFIG_LIBEXEC:-/usr/libexec/router-config}
 NETWORK_INIT=${ROUTER_CONFIG_NETWORK_INIT:-/etc/init.d/network}
 FIREWALL_INIT=${ROUTER_CONFIG_FIREWALL_INIT:-/etc/init.d/firewall}
+UHTTPD_INIT=${ROUTER_CONFIG_UHTTPD_INIT:-/etc/init.d/uhttpd}
+DROPBEAR_INIT=${ROUTER_CONFIG_DROPBEAR_INIT:-/etc/init.d/dropbear}
 CHRONYD_INIT=${ROUTER_CONFIG_CHRONYD_INIT:-/etc/init.d/chronyd}
 HTTPS_DNS_PROXY_INIT=${ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT:-/etc/init.d/https-dns-proxy}
 DNSMASQ_INIT=${ROUTER_CONFIG_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
@@ -38,8 +40,8 @@ else
     MODULE_DIR=${LIBEXEC}.modules
 fi
 RUNTIME_MODULE_DIR=${ROUTER_CONFIG_RUNTIME_MODULE_DIR:-${LIBEXEC}.modules}
-UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast chrony'
-MODULES='network firewall wireless nts dns-over-https adblock-fast wireguard'
+UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast chrony uhttpd dropbear'
+MODULES='network firewall wireless admin-access nts dns-over-https adblock-fast wireguard'
 
 die() {
     printf 'router-config: %s\n' "$*" >&2
@@ -177,6 +179,7 @@ preflight_base() {
     network_module_preflight
     firewall_module_preflight
     wireless_module_preflight
+    admin_access_preflight
 }
 
 preflight() {
@@ -223,6 +226,7 @@ validate_candidate() {
     network_module_validate "$candidate_dir"
     firewall_module_validate "$candidate_dir"
     wireless_module_validate "$candidate_dir"
+    admin_access_validate "$candidate_dir"
     nts_validate "$candidate_dir"
     dns_over_https_validate "$candidate_dir"
     adblock_fast_validate "$candidate_dir"
@@ -298,7 +302,7 @@ prepare() {
         : >"$transaction_dir/backup/modules.conf"
         : >"$transaction_dir/candidate/modules.conf"
     fi
-    for overlay_name in network firewall wireless nts dns-over-https adblock-fast; do
+    for overlay_name in network firewall wireless admin-access nts dns-over-https adblock-fast; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
     wireguard_render_overlay "$UCI_DIR/wireguard" "$transaction_dir/overlay/wireguard"
@@ -307,6 +311,7 @@ prepare() {
     network_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/network"
     firewall_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/firewall"
     wireless_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireless"
+    admin_access_stage "$transaction_dir/candidate" "$transaction_dir/overlay/admin-access"
     nts_stage "$transaction_dir/candidate" "$transaction_dir/overlay/nts"
     dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
     adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
@@ -421,6 +426,14 @@ reload_services() {
     fi
     if ! "$FIREWALL_INIT" reload; then
         RELOAD_FAILED_STEP=firewall
+        return 1
+    fi
+    if ! "$UHTTPD_INIT" restart; then
+        RELOAD_FAILED_STEP=uhttpd
+        return 1
+    fi
+    if ! "$DROPBEAR_INIT" restart; then
+        RELOAD_FAILED_STEP=dropbear
         return 1
     fi
     if ! "$CHRONYD_INIT" restart; then

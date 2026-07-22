@@ -22,9 +22,9 @@ candidate can disconnect the router and require local recovery.
 - `modules/` holds internal shell modules sourced by `setup.sh` or
   `router-config.sh`. They are not standalone commands. Fixed order matters:
   base packages (setup only), then during prepare staging: network, firewall,
-  wireless, nts, dns-over-https, adblock-fast, wireguard. Package install
-  callbacks for NTS, DNS, adblock, and WireGuard run from `setup.sh` before
-  prepare.
+  wireless, admin-access, nts, dns-over-https, adblock-fast, wireguard. Package
+  install callbacks for NTS, DNS, adblock, and WireGuard run from `setup.sh`
+  before prepare.
 - `uci/` holds feature-oriented UCI batch overlays applied onto a copy of the
   live config inside a candidate directory. They are not full replacements for
   `/etc/config/*`.
@@ -97,6 +97,12 @@ path over direct remote replacement of live config files.
   other VLANs; IoT has no WAN forwarding and rejects general zone output.
   Restricted VLANs allow only explicitly permitted router services (DNS/DHCP),
   plus the IoT DHCP-reply exception.
+- Bind LuCI and SSH to Pixel only via `uci/admin-access` /
+  `docs/admin-access.md`: uhttpd listens on `192.168.8.1:80` and
+  `192.168.8.1:443` only; Dropbear uses `DirectInterface=pixel` (not the
+  legacy IP-only `Interface` option). Restricted-VLAN firewall input remains
+  complementary defense; do not leave stock wildcard listeners on Guest/IoT/
+  Things gateway addresses.
 - Keep Wi-Fi client isolation (`wifi-iface.isolate=1`) on Guest, IoT, and
   Things only; leave Pixel unisolated so trusted stations can talk L2. This is
   OpenWrt's AP-mode isolate option (hostapd `ap_isolate`), distinct from
@@ -206,16 +212,20 @@ uci get firewall.defaults.flow_offloading_hw
 grep -x 'options mt7915e wed_enable=Y' /etc/modules.conf
 uci show https-dns-proxy
 uci show chrony
+uci show uhttpd | grep listen_
+uci show dropbear
 chronyc tracking
 chronyc -N authdata
 /etc/init.d/sysntpd enabled >/dev/null 2>&1 && echo 'sysntpd still enabled'
-logread -e netifd -e firewall -e https-dns-proxy -e chronyd
+logread -e netifd -e firewall -e https-dns-proxy -e chronyd -e uhttpd -e dropbear
 ```
 
 Confirm from a client in each VLAN that DHCP and DNS work, expected internet
 access works, forbidden inter-VLAN routes remain blocked, and the management
-VLAN can still reach the router. Verify WireGuard handshake and routing
-separately. After confirm and reboot, verify WED with
+VLAN can still reach the router (LuCI/SSH only on `192.168.8.1` / Pixel).
+Verify Guest/IoT/Things cannot open TCP to their own gateway on ports 22, 80,
+or 443. Verify WireGuard handshake and routing separately. After confirm and
+reboot, verify WED with
 `cat /sys/module/mt7915e/parameters/wed_enable` (expect `Y`). If a command is
 unavailable on the target OpenWrt release, report that and use the
 release-appropriate equivalent rather than skipping silently.

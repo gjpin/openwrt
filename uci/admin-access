@@ -1,0 +1,13 @@
+# Feature overlay: bind LuCI and SSH to the Pixel management VLAN only.
+
+delete uhttpd.main.listen_http
+delete uhttpd.main.listen_https
+add_list uhttpd.main.listen_http='192.168.8.1:80'
+add_list uhttpd.main.listen_https='192.168.8.1:443'
+set uhttpd.main.redirect_https='1'
+
+delete dropbear.main.Interface
+delete dropbear.main.DirectInterface
+set dropbear.main.DirectInterface='pixel'
+set dropbear.main.Port='22'
+set dropbear.main.enable='1'

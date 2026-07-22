@@ -185,9 +185,9 @@ def router():
     (proc_net / "udp").write_text("")
     for name in ("br-lan", "lan1", "lan2", "lan3", "lan4", "lan5"):
         (sys_net / name).mkdir(parents=True)
-    for name in ("network", "firewall", "wireless", "nts", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "admin-access", "nts", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "uci" / name, overlays / name)
-    for name in ("network", "firewall", "wireless", "nts", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "admin-access", "nts", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "modules" / f"{name}.sh", modules / f"{name}.sh")
 
     network = {
@@ -225,6 +225,23 @@ def router():
         "makestep": {".type": "makestep", "threshold": "1.0", "limit": "3"},
         "nts": {".type": "nts", "rtccheck": "1", "systemcerts": "1"},
     }
+    uhttpd = {
+        "main": {
+            ".type": "uhttpd",
+            "listen_http": ["0.0.0.0:80", "[::]:80"],
+            "listen_https": ["0.0.0.0:443", "[::]:443"],
+            "redirect_https": "0",
+        },
+    }
+    dropbear = {
+        "@dropbear[0]": {
+            ".type": "dropbear",
+            "PasswordAuth": "on",
+            "RootPasswordAuth": "on",
+            "Port": "22",
+            "enable": "1",
+        },
+    }
     for name, value in (
         ("network", network),
         ("firewall", firewall),
@@ -234,6 +251,8 @@ def router():
         ("https-dns-proxy", https_dns_proxy),
         ("adblock-fast", adblock),
         ("chrony", chrony),
+        ("uhttpd", uhttpd),
+        ("dropbear", dropbear),
     ):
         (config / name).write_text(json.dumps(value))
 
@@ -281,6 +300,8 @@ exit 0
     for name in (
         "network-init",
         "firewall-init",
+        "uhttpd-init",
+        "dropbear-init",
         "sysntpd-init",
         "chronyd-init",
         "https-dns-proxy-init",
@@ -306,6 +327,8 @@ exit 0
         "ROUTER_CONFIG_MODULES_CONF": str(modules_conf),
         "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
         "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
+        "ROUTER_CONFIG_UHTTPD_INIT": str(services["uhttpd-init"]),
+        "ROUTER_CONFIG_DROPBEAR_INIT": str(services["dropbear-init"]),
         "ROUTER_CONFIG_SYSNTPD_INIT": str(services["sysntpd-init"]),
         "ROUTER_CONFIG_CHRONYD_INIT": str(services["chronyd-init"]),
         "ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT": str(services["https-dns-proxy-init"]),
@@ -437,6 +460,16 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "allow" not in chrony
     assert chrony["nts"]["rtccheck"] == "1"
     assert chrony["nts"]["systemcerts"] == "1"
+    uhttpd = json.loads((transaction_dir / "candidate" / "uhttpd").read_text())
+    assert uhttpd["main"]["listen_http"] == ["192.168.8.1:80"]
+    assert uhttpd["main"]["listen_https"] == ["192.168.8.1:443"]
+    assert uhttpd["main"]["redirect_https"] == "1"
+    dropbear = json.loads((transaction_dir / "candidate" / "dropbear").read_text())
+    assert "@dropbear[0]" not in dropbear
+    assert dropbear["main"]["DirectInterface"] == "pixel"
+    assert dropbear["main"]["Port"] == "22"
+    assert dropbear["main"]["enable"] == "1"
+    assert "Interface" not in dropbear["main"]
     system = json.loads((transaction_dir / "candidate" / "system").read_text())
     assert system["ntp"]["server"] == ["old"]
     adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
@@ -457,6 +490,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     manifest = (transaction_dir / "manifest.sha256").read_text()
     assert "backup/https-dns-proxy" in manifest
     assert "candidate/https-dns-proxy" in manifest
+    assert "backup/uhttpd" in manifest
+    assert "candidate/uhttpd" in manifest
+    assert "backup/dropbear" in manifest
+    assert "candidate/dropbear" in manifest
     assert (transaction_dir / "candidate" / "wireless").stat().st_mode & 0o777 == 0o600
     rendered = (transaction_dir / "overlay" / "wireguard").read_text()
     assert env["VPN_KEY"] not in rendered
@@ -474,10 +511,32 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
 def test_repeated_prepare_is_idempotent(router):
     _, config, backups, _, env = router
     _, first = prepare(env)
-    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony"):
+    for name in (
+        "network",
+        "firewall",
+        "wireless",
+        "dhcp",
+        "system",
+        "https-dns-proxy",
+        "adblock-fast",
+        "chrony",
+        "uhttpd",
+        "dropbear",
+    ):
         shutil.copy(backups / first / "candidate" / name, config / name)
     _, second = prepare(env)
-    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony"):
+    for name in (
+        "network",
+        "firewall",
+        "wireless",
+        "dhcp",
+        "system",
+        "https-dns-proxy",
+        "adblock-fast",
+        "chrony",
+        "uhttpd",
+        "dropbear",
+    ):
         data = json.loads((backups / second / "candidate" / name).read_text())
         assert len(data) == len(set(data))
     assert json.loads((backups / second / "candidate" / "network").read_text())["br_lan"]["stp"] == "1"
@@ -685,7 +744,7 @@ def test_missing_transaction_module_is_rejected(router):
 
 def test_apply_confirm_and_manual_rollback(router):
     _, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
@@ -772,7 +831,7 @@ def test_apply_fw4_failure_restores_backup(router):
 
 def test_https_dns_proxy_stop_failure_restores_backup(router):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
     fail = root / "https-stop-fail"
@@ -839,6 +898,8 @@ def test_https_dns_proxy_nonzero_restart_is_accepted_when_all_listeners_are_read
     ("network-init", "reload", "network"),
     ("wifi", "reload", "wifi"),
     ("firewall-init", "reload", "firewall"),
+    ("uhttpd-init", "restart", "uhttpd"),
+    ("dropbear-init", "restart", "dropbear"),
     ("chronyd-init", "restart", "chronyd"),
     ("https-dns-proxy-init", "restart", "https-dns-proxy"),
     ("dnsmasq-init", "restart", "dnsmasq"),
@@ -848,7 +909,7 @@ def test_each_coordinated_service_failure_is_named_and_restores_every_file(
     router, service_name, action, failure_label
 ):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
     fail = root / f"{service_name}-fail"
@@ -887,7 +948,7 @@ def test_transaction_tampering_is_rejected(router):
 
 def test_partial_candidate_installation_failure_restores_all_packages(router):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
@@ -1023,9 +1084,21 @@ def test_https_dns_proxy_validation_and_forward_mismatch_are_preapply_failures(r
     assert (config / "network").read_text() == original
 
 
+def test_admin_access_validation_rejects_wildcard_uhttpd_listen(router):
+    _, config, backups, overlays, env = router
+    original = (config / "network").read_text()
+    with (overlays / "admin-access").open("a") as stream:
+        stream.write("\nadd_list uhttpd.main.listen_http='0.0.0.0:80'\n")
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert "uhttpd must listen only on 192.168.8.1:80" in result.stderr
+    assert (config / "network").read_text() == original
+    assert not any(backups.glob("*/state"))
+
+
 def test_feature_install_callbacks_only_install_and_enable(router):
     root, config, _, _, env = router
-    names = ("network", "firewall", "dhcp", "https-dns-proxy", "adblock-fast", "chrony")
+    names = ("network", "firewall", "dhcp", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
     before = {name: (config / name).read_text() for name in names}
     apk_log = root / "apk.log"
     init_log = root / "init.log"
@@ -1084,7 +1157,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
     positions = [source.rindex(call) for call in calls]
     assert positions == sorted(positions)
     for name in (
-        "base-packages", "network", "firewall", "wireless", "nts",
+        "base-packages", "network", "firewall", "wireless", "admin-access", "nts",
         "dns-over-https", "adblock-fast", "wireguard",
     ):
         assert f"modules/{name}.sh" in source
@@ -1097,9 +1170,19 @@ def test_setup_declares_fixed_module_order_and_all_members():
     assert "adblock_fast_run" not in source
     assert "wireguard_run" not in source
     assert "nts_run" not in source
+    assert "admin_access_run" not in source
     assert "adblock selector" not in (REPO / "README.md").read_text().lower()
 
     transaction_source = (REPO / "router-config.sh").read_text()
+    assert transaction_source.index('"$FIREWALL_INIT" reload') < transaction_source.index(
+        '"$UHTTPD_INIT" restart'
+    )
+    assert transaction_source.index('"$UHTTPD_INIT" restart') < transaction_source.index(
+        '"$DROPBEAR_INIT" restart'
+    )
+    assert transaction_source.index('"$DROPBEAR_INIT" restart') < transaction_source.index(
+        '"$CHRONYD_INIT" restart'
+    )
     assert transaction_source.index('"$HTTPS_DNS_PROXY_INIT" restart') < transaction_source.index(
         '"$DNSMASQ_INIT" restart'
     )
