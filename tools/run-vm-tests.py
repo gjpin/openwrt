@@ -27,6 +27,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 CACHE = REPO / ".cache" / "openwrt-vm"
 RELEASE = "25.12.4"
+QEMU_ISP_NETWORK = "192.168.1.0/24"
+QEMU_ISP_GATEWAY = "192.168.1.1"
+QEMU_WAN_ADDRESS = "192.168.1.2"
+QEMU_ISP_DNS = "192.168.1.3"
 BASE_URL = f"https://downloads.openwrt.org/releases/{RELEASE}/targets/armsr/armv8"
 ARTIFACTS = {
     "openwrt-25.12.4-armsr-armv8-generic-kernel.bin":
@@ -201,12 +205,16 @@ def qemu_command(qemu: str, kernel: Path, disk: Path, disk_root: bool) -> list[s
     kernel_args = "console=ttyAMA0,115200n8"
     if disk_root:
         kernel_args = "root=/dev/vda rootwait " + kernel_args
+    uplink = (
+        f"user,id=uplink,net={QEMU_ISP_NETWORK},host={QEMU_ISP_GATEWAY},"
+        f"dhcpstart={QEMU_WAN_ADDRESS},dns={QEMU_ISP_DNS}"
+    )
     return [
         qemu, "-M", "virt", *accelerator_args(), "-m", "1024", "-smp", "2",
         "-nographic", "-kernel", str(kernel),
         "-drive", f"file={disk},format=raw,if=virtio",
         "-append", kernel_args,
-        "-netdev", "user,id=uplink", "-device", "virtio-net-pci,netdev=uplink",
+        "-netdev", uplink, "-device", "virtio-net-pci,netdev=uplink",
     ]
 
 
@@ -316,7 +324,7 @@ def main() -> int:
         console = SerialConsole(process, workdir / "serial-redacted.log")
         wait_for_boot(console)
         configure_uplink(console)
-        guest_url = f"http://10.0.2.2:{port}/repository.tar.gz"
+        guest_url = f"http://{QEMU_ISP_GATEWAY}:{port}/repository.tar.gz"
         console.command(f"uclient-fetch '{guest_url}' -O /tmp/repository.tar.gz", 60)
         console.command(f"echo '{archive_hash}  /tmp/repository.tar.gz' | sha256sum -c -", 30)
         console.command("mkdir -p /tmp/source; tar -xzf /tmp/repository.tar.gz -C /tmp/source", 30)
