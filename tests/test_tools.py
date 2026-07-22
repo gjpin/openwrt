@@ -257,7 +257,8 @@ def test_vm_guest_keeps_production_wan_for_second_setup_and_live_doh():
     )
     second_setup = source.index("run_and_confirm second", wan_static)
     live = source.index('if [ "$profile" = live ]; then', second_setup)
-    assert first_setup < wan_static < second_setup < live
+    rollback = source.index("check_doh_listeners 'before rollback'", live)
+    assert first_setup < wan_static < second_setup < live < rollback
     assert "restore_qemu_wan_dhcp" not in source
     assert "10.0.2." not in source
 
@@ -300,6 +301,25 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
     assert "Guest TCP/853 reject packets before:" in source
     assert "Guest TCP/853 reject packets after:" in source
     assert "--- DoT probe output ---" in source
+
+
+def test_vm_guest_live_doh_waits_for_egress_and_retries_dig():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    live_start = source.index('if [ "$profile" = live ]; then')
+    live = source[live_start : source.index("\nfi\n", live_start)]
+    assert "check_doh_listeners 'before live DoH'" in live
+    assert "live DoH egress probe attempt" in live
+    assert "ping -c 1 -W 2 192.168.1.1" in live
+    assert "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/" in live
+    assert "/etc/init.d/firewall reload" in live
+    assert "fail 'live DoH egress was not ready'" in live
+    assert "/etc/init.d/https-dns-proxy restart" in live
+    assert "check_doh_listeners 'after live DoH restart'" in live
+    assert 'while [ "$doh_attempt" -lt 8 ]; do' in live
+    assert "dig +time=5 +tries=1 @127.0.0.1 -p \"$port\" example.com A" in live
+    assert "--- dig output ---" in live
+    assert 'fail "live DoH query failed on $port"' in live
+    assert 'dig +time=10 +tries=1 @127.0.0.1 -p "$port" openwrt.org A' not in live
 
 
 def test_vm_guest_live_blocklist_check_avoids_full_redownload():

@@ -497,27 +497,79 @@ if ! cmp -s /tmp/first.export /tmp/second.export; then
     diff -u /tmp/first.export /tmp/second.export >/tmp/vm-test-failure-detail 2>&1 || :
     fail 'second installation changed normalized UCI exports'
 fi
-check_doh_listeners 'before rollback'
-/usr/libexec/router-config rollback "$LAST_TX"
-[ "$(cat "/root/router-config-backups/$LAST_TX/state")" = rolledback ] || fail 'manual rollback did not complete'
-check_doh_listeners 'after manual rollback'
-check_ap_interfaces 'after manual rollback'
 
-boot_prepare=$(./router-config.sh prepare --recovery-ready)
-boot_tx=$(printf '%s\n' "$boot_prepare" | tail -n 1)
-touch "/root/router-config-backups/$boot_tx/pending"
-printf '%s\n' pending >"/root/router-config-backups/$boot_tx/state"
-/etc/init.d/router-config-rollback start
-[ "$(cat "/root/router-config-backups/$boot_tx/state")" = rolledback ] || fail 'early-boot service did not recover pending state'
-check_doh_listeners 'after early-boot recovery'
-check_ap_interfaces 'after early-boot recovery'
-
+# Live upstream checks belong on the just-applied managed config, before
+# rollback churn. Package install already proved WAN HTTPS works; wait for the
+# same egress path again because netifd/fw4 reloads can briefly EPERM outbound
+# sockets the way apk's wget does.
 if [ "$profile" = live ]; then
-    /etc/init.d/https-dns-proxy restart
-    sleep 5
+    check_doh_listeners 'before live DoH'
+    live_egress_ready=0
+    live_egress_attempt=0
+    while [ "$live_egress_attempt" -lt 15 ]; do
+        live_egress_attempt=$((live_egress_attempt + 1))
+        printf 'vm-test: live DoH egress probe attempt %s/15\n' "$live_egress_attempt" >&2
+        if ping -c 1 -W 2 192.168.1.1 >/tmp/vm-test-live-doh-ping 2>&1 &&
+            uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
+                >/tmp/vm-test-live-doh-wget 2>&1; then
+            live_egress_ready=1
+            break
+        fi
+        # Explicit fw4 refresh absorbs the same post-reload EPERM race seen by
+        # apk; keep the managed candidate intact.
+        /etc/init.d/firewall reload >/tmp/vm-test-live-doh-fw 2>&1 || :
+        sleep 2
+    done
+    if [ "$live_egress_ready" != 1 ]; then
+        {
+            printf 'live DoH egress failed after %s attempts\n' "$live_egress_attempt"
+            printf '%s\n' '--- ping probe ---'
+            cat /tmp/vm-test-live-doh-ping 2>&1 || :
+            printf '%s\n' '--- wget probe ---'
+            cat /tmp/vm-test-live-doh-wget 2>&1 || :
+            printf '%s\n' '--- firewall reload ---'
+            cat /tmp/vm-test-live-doh-fw 2>&1 || :
+            printf '%s\n' '--- WAN status ---'
+            ifstatus wan || :
+            printf '%s\n' '--- ip route ---'
+            ip -4 route || :
+        } >/tmp/vm-test-failure-detail 2>&1 || :
+        fail 'live DoH egress was not ready'
+    fi
+    /etc/init.d/https-dns-proxy restart || fail 'failed to restart https-dns-proxy for live DoH'
+    check_doh_listeners 'after live DoH restart'
     for port in 5053 5054 5055 5056; do
-        dig +time=10 +tries=1 @127.0.0.1 -p "$port" openwrt.org A | grep -q 'status: NOERROR' ||
+        doh_ok=0
+        doh_attempt=0
+        while [ "$doh_attempt" -lt 8 ]; do
+            doh_attempt=$((doh_attempt + 1))
+            printf 'vm-test: live DoH dig %s attempt %s/8\n' "$port" "$doh_attempt" >&2
+            if dig +time=5 +tries=1 @127.0.0.1 -p "$port" example.com A \
+                >/tmp/vm-test-live-doh-dig 2>&1 &&
+                grep -q 'status: NOERROR' /tmp/vm-test-live-doh-dig; then
+                doh_ok=1
+                break
+            fi
+            sleep 2
+        done
+        if [ "$doh_ok" != 1 ]; then
+            {
+                printf 'live DoH query failed on %s after %s attempts\n' "$port" "$doh_attempt"
+                printf '%s\n' '--- dig output ---'
+                cat /tmp/vm-test-live-doh-dig 2>&1 || :
+                printf '%s\n' '--- https-dns-proxy status ---'
+                /etc/init.d/https-dns-proxy status 2>&1 || :
+                printf '%s\n' '--- ss listeners ---'
+                ss -lntu || :
+                printf '%s\n' '--- WAN status ---'
+                ifstatus wan || :
+                printf '%s\n' '--- ip route ---'
+                ip -4 route || :
+                printf '%s\n' '--- https-dns-proxy / dig log ---'
+                logread -e https-dns-proxy -e dig 2>&1 || :
+            } >/tmp/vm-test-failure-detail 2>&1 || :
             fail "live DoH query failed on $port"
+        fi
     done
     # Do not re-download multi-megabyte blocklists here. Setup already fetched
     # them, and once dnsmasq.servers is active a source host that appears in any
@@ -537,6 +589,21 @@ if [ "$profile" = live ]; then
         esac
     done </tmp/vm-test-blocklist-urls
 fi
+
+check_doh_listeners 'before rollback'
+/usr/libexec/router-config rollback "$LAST_TX"
+[ "$(cat "/root/router-config-backups/$LAST_TX/state")" = rolledback ] || fail 'manual rollback did not complete'
+check_doh_listeners 'after manual rollback'
+check_ap_interfaces 'after manual rollback'
+
+boot_prepare=$(./router-config.sh prepare --recovery-ready)
+boot_tx=$(printf '%s\n' "$boot_prepare" | tail -n 1)
+touch "/root/router-config-backups/$boot_tx/pending"
+printf '%s\n' pending >"/root/router-config-backups/$boot_tx/state"
+/etc/init.d/router-config-rollback start
+[ "$(cat "/root/router-config-backups/$boot_tx/state")" = rolledback ] || fail 'early-boot service did not recover pending state'
+check_doh_listeners 'after early-boot recovery'
+check_ap_interfaces 'after early-boot recovery'
 
 # Associate one isolated WPA3-SAE hwsim station with each managed SSID and
 # obtain its lease through the real AP/netifd bridge path.
