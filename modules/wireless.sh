@@ -17,6 +17,7 @@ wireless_module_validate_passwords() {
 
 wireless_module_preflight() {
     wireless_module_validate_passwords
+    [ -n "${COUNTRY-}" ] || die 'required variable is empty: COUNTRY'
     WIRELESS_2G_DEVICE=
     WIRELESS_5G_DEVICE=
     wifi_devices=$(uci -q -c "$CONFIG_DIR" show wireless |
@@ -55,6 +56,8 @@ wireless_module_stage() {
     uci -q -c "$candidate_dir" set "wireless.pixelthings.device=$WIRELESS_5G_DEVICE"
     uci -q -c "$candidate_dir" set "wireless.pixelguest.device=$WIRELESS_5G_DEVICE"
     uci -q -c "$candidate_dir" set "wireless.pixeliot.device=$WIRELESS_2G_DEVICE"
+    uci -q -c "$candidate_dir" set "wireless.$WIRELESS_2G_DEVICE.country=$COUNTRY"
+    uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.country=$COUNTRY"
     uci -q -c "$candidate_dir" commit wireless || die 'failed to serialize wireless candidate'
     wireless_stage_wed "$candidate_dir/modules.conf"
 }
@@ -85,6 +88,10 @@ wireless_module_validate() {
     done
     [ "$(uci_get "$candidate_dir" wireless.pixeliot.device)" = "$WIRELESS_2G_DEVICE" ] ||
         die 'wireless.pixeliot is not assigned to the 2.4 GHz radio'
+    [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_2G_DEVICE.country")" = "$COUNTRY" ] ||
+        die "wireless.$WIRELESS_2G_DEVICE.country is not set to COUNTRY"
+    [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.country")" = "$COUNTRY" ] ||
+        die "wireless.$WIRELESS_5G_DEVICE.country is not set to COUNTRY"
     modules_file=$candidate_dir/modules.conf
     [ -f "$modules_file" ] || die 'candidate lacks modules.conf'
     grep -qx 'options mt7915e wed_enable=Y' "$modules_file" ||

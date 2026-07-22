@@ -393,6 +393,7 @@ export PIXEL_WIFI_PASSWORD='vm-pixel-password'
 export THINGS_WIFI_PASSWORD='vm-things-password'
 export GUEST_WIFI_PASSWORD='vm-guest-password'
 export IOT_WIFI_PASSWORD='vm-iot-password'
+export COUNTRY='US'
 export VPN_IF='wgserver'
 export VPN_PORT='42451'
 export VPN_KEY="$server_private"

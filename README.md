@@ -81,6 +81,7 @@ must run on the target router as `root`; do not run it on a workstation.
    export THINGS_WIFI_PASSWORD='replace-me'
    export GUEST_WIFI_PASSWORD='replace-me'
    export IOT_WIFI_PASSWORD='replace-me'
+   export COUNTRY='XX'
    export VPN_IF='wgserver'
    export VPN_PORT='42451'
    export VPN_KEY='replace-with-server-private-key'

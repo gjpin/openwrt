@@ -16,10 +16,14 @@ This module creates four WPA3-SAE access points across the router's 2.4 GHz and
 Passwords must contain 8–63 printable characters. They are injected into the
 mode-0600 transaction candidate and are never stored in the tracked overlay.
 
+`COUNTRY` must be set to a two-letter ISO country code (`A–Z`). It is applied to
+both discovered `wifi-device` sections at prepare time. There is no default;
+setup fails if `COUNTRY` is unset or empty.
+
 The module requires exactly one existing `wifi-device` with `band '2g'` and one
 with `band '5g'`. It discovers their section names rather than assuming radio
-numbering. Channel, country, and other device settings remain part of the
-router's base configuration.
+numbering. Channel and other device settings remain part of the router's base
+configuration.
 
 The same transaction also manages `/etc/modules.conf` for Wireless Ethernet
 Dispatch (WED). The candidate ensures exactly one line:

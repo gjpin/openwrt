@@ -292,6 +292,7 @@ exit 0
         "THINGS_WIFI_PASSWORD": "things-secret-123",
         "GUEST_WIFI_PASSWORD": "guest-secret-123",
         "IOT_WIFI_PASSWORD": "iot-secret-123",
+        "COUNTRY": "US",
         "VPN_IF": "wgserver",
         "VPN_PORT": "42451",
         "VPN_KEY": "private-secret",
@@ -349,6 +350,8 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["pixelthings"]["device"] == "radio0"
     assert wireless["pixelguest"]["device"] == "radio0"
     assert wireless["pixeliot"]["device"] == "radio1"
+    assert wireless["radio0"]["country"] == "US"
+    assert wireless["radio1"]["country"] == "US"
     firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
     assert firewall["defaults"]["flow_offloading"] == "1"
     assert firewall["defaults"]["flow_offloading_hw"] == "1"
@@ -835,6 +838,22 @@ def test_setup_rejects_an_incomplete_repository_before_mutation(router):
     assert result.returncode != 0
     assert "repository file is missing or empty" in result.stderr
     assert not mutation_marker.exists()
+
+
+def test_setup_rejects_missing_country_before_mutation(router):
+    root, _, _, _, env = router
+    marker = root / "mutation-attempted"
+    write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{marker}'\n")
+    key = "A" * 43 + "="
+    env.update({"VPN_KEY": key, "VPN_PUB": key, "VPN_PSK": key})
+    env.pop("COUNTRY", None)
+    result = subprocess.run(
+        [str(REPO / "setup.sh"), "--recovery-ready"],
+        env=env, text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "required variable is empty: COUNTRY" in result.stderr
+    assert not marker.exists()
 
 
 def test_setup_validates_all_inputs_before_mutation(router):
