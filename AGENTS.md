@@ -135,7 +135,9 @@ path over direct remote replacement of live config files.
   secrets/settings are `PIXEL_WIFI_PASSWORD`, `THINGS_WIFI_PASSWORD`,
   `GUEST_WIFI_PASSWORD`, `IOT_WIFI_PASSWORD`, `COUNTRY`, `VPN_IF`, `VPN_PORT`,
   `VPN_KEY`, `VPN_ADDR`, `VPN_PUB`, and `VPN_PSK`. There is no `VPN_ADDR6`.
-  `COUNTRY` is a required two-letter ISO code with no default.
+  `COUNTRY` is a required two-letter ISO code with no default. Optional
+  `CHANNEL` defaults to `52` (5 GHz DFS); the wireless module also forces
+  5 GHz `htmode=HE80`.
 - Keep operations idempotent. Re-running prepare/apply must not append
   duplicate UCI rules, redirects, list entries, sections, or `modules.conf`
   WED option lines.

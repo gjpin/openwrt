@@ -18,6 +18,12 @@ wireless_module_validate_passwords() {
 wireless_module_preflight() {
     wireless_module_validate_passwords
     [ -n "${COUNTRY-}" ] || die 'required variable is empty: COUNTRY'
+    CHANNEL=${CHANNEL:-52}
+    case $CHANNEL in
+        '' | *[!0-9]*) die 'CHANNEL must be an integer from 36 through 177' ;;
+    esac
+    [ "$CHANNEL" -ge 36 ] 2>/dev/null && [ "$CHANNEL" -le 177 ] 2>/dev/null ||
+        die 'CHANNEL must be an integer from 36 through 177'
     WIRELESS_2G_DEVICE=
     WIRELESS_5G_DEVICE=
     wifi_devices=$(uci -q -c "$CONFIG_DIR" show wireless |
@@ -58,6 +64,8 @@ wireless_module_stage() {
     uci -q -c "$candidate_dir" set "wireless.pixeliot.device=$WIRELESS_2G_DEVICE"
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_2G_DEVICE.country=$COUNTRY"
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.country=$COUNTRY"
+    uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.channel=$CHANNEL"
+    uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.htmode=HE80"
     uci -q -c "$candidate_dir" commit wireless || die 'failed to serialize wireless candidate'
     wireless_stage_wed "$candidate_dir/modules.conf"
 }
@@ -92,6 +100,10 @@ wireless_module_validate() {
         die "wireless.$WIRELESS_2G_DEVICE.country is not set to COUNTRY"
     [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.country")" = "$COUNTRY" ] ||
         die "wireless.$WIRELESS_5G_DEVICE.country is not set to COUNTRY"
+    [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.channel")" = "$CHANNEL" ] ||
+        die "wireless.$WIRELESS_5G_DEVICE.channel is not set to CHANNEL"
+    [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.htmode")" = HE80 ] ||
+        die "wireless.$WIRELESS_5G_DEVICE.htmode is not set to HE80"
     modules_file=$candidate_dir/modules.conf
     [ -f "$modules_file" ] || die 'candidate lacks modules.conf'
     grep -qx 'options mt7915e wed_enable=Y' "$modules_file" ||

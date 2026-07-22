@@ -352,6 +352,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["pixeliot"]["device"] == "radio1"
     assert wireless["radio0"]["country"] == "US"
     assert wireless["radio1"]["country"] == "US"
+    assert wireless["radio0"]["channel"] == "52"
+    assert wireless["radio0"]["htmode"] == "HE80"
+    assert wireless["radio1"].get("channel") == "auto"
+    assert "htmode" not in wireless["radio1"]
     firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
     assert firewall["defaults"]["flow_offloading"] == "1"
     assert firewall["defaults"]["flow_offloading_hw"] == "1"
@@ -535,6 +539,40 @@ def test_wireless_assignment_follows_bands_not_radio_numbers(router):
     assert candidate["pixelthings"]["device"] == "radio1"
     assert candidate["pixelguest"]["device"] == "radio1"
     assert candidate["pixeliot"]["device"] == "radio0"
+    assert candidate["radio1"]["channel"] == "52"
+    assert candidate["radio1"]["htmode"] == "HE80"
+
+
+def test_prepare_applies_custom_channel_with_he80(router):
+    _, _, backups, _, env = router
+    env["CHANNEL"] = "149"
+    _, transaction = prepare(env)
+    candidate = json.loads((backups / transaction / "candidate" / "wireless").read_text())
+    assert candidate["radio0"]["channel"] == "149"
+    assert candidate["radio0"]["htmode"] == "HE80"
+
+
+def test_prepare_rejects_invalid_channel(router):
+    _, _, _, _, env = router
+    env["CHANNEL"] = "nope"
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert "CHANNEL must be an integer from 36 through 177" in result.stderr
+
+
+def test_setup_rejects_invalid_channel_before_mutation(router):
+    root, _, _, _, env = router
+    marker = root / "mutation-attempted"
+    write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{marker}'\n")
+    key = "A" * 43 + "="
+    env.update({"VPN_KEY": key, "VPN_PUB": key, "VPN_PSK": key, "CHANNEL": "12"})
+    result = subprocess.run(
+        [str(REPO / "setup.sh"), "--recovery-ready"],
+        env=env, text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "CHANNEL must be an integer from 36 through 177" in result.stderr
+    assert not marker.exists()
 
 
 def test_preflight_requires_explicit_2g_and_5g_radios(router):

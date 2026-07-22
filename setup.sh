@@ -60,6 +60,7 @@ validate_repository() {
 }
 
 validate_inputs() {
+    CHANNEL=${CHANNEL:-52}
     for variable_name in \
         PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
         VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK COUNTRY; do
@@ -72,6 +73,11 @@ validate_inputs() {
         [A-Z][A-Z]) ;;
         *) die 'COUNTRY must be a two-letter ISO country code (A-Z)' ;;
     esac
+    case $CHANNEL in
+        '' | *[!0-9]*) die 'CHANNEL must be an integer from 36 through 177' ;;
+    esac
+    [ "$CHANNEL" -ge 36 ] 2>/dev/null && [ "$CHANNEL" -le 177 ] 2>/dev/null ||
+        die 'CHANNEL must be an integer from 36 through 177'
     case $VPN_IF in
         [A-Za-z_]*) ;;
         *) die 'VPN_IF must begin with a letter or underscore' ;;
@@ -102,7 +108,7 @@ validate_inputs() {
 validate_inputs
 validate_repository
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
-export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK COUNTRY
+export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK COUNTRY CHANNEL
 
 # Reject unsupported or ambiguous stock configuration before package
 # installation or init-service enablement performs the first router mutation.

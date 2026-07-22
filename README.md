@@ -82,6 +82,8 @@ must run on the target router as `root`; do not run it on a workstation.
    export GUEST_WIFI_PASSWORD='replace-me'
    export IOT_WIFI_PASSWORD='replace-me'
    export COUNTRY='XX'
+   # Optional: 5 GHz channel (default 52, DFS). Width is always HE80.
+   # export CHANNEL='52'
    export VPN_IF='wgserver'
    export VPN_PORT='42451'
    export VPN_KEY='replace-with-server-private-key'

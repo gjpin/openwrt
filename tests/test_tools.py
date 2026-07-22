@@ -182,6 +182,7 @@ def test_vm_guest_sets_regulatory_country_and_reports_wifi_failures():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     assert "set wireless.radio0.country='US'" in source
     assert "set wireless.radio1.country='US'" in source
+    assert "export CHANNEL='36'" in source
     helper_start = source.index("wifi_client() {")
     helper = source[helper_start : source.index('\nwifi_client "$pixel_client_phy"', helper_start)]
     assert "iw reg get" in helper

@@ -20,10 +20,16 @@ mode-0600 transaction candidate and are never stored in the tracked overlay.
 both discovered `wifi-device` sections at prepare time. There is no default;
 setup fails if `COUNTRY` is unset or empty.
 
+`CHANNEL` selects the 5 GHz primary channel and defaults to `52` when unset.
+That channel is DFS (UNII-2A) in typical regulatory domains, so the radio runs
+a Channel Availability Check before beacons appear. Setup and prepare accept an
+integer from `36` through `177`. The module always sets the 5 GHz `htmode` to
+`HE80` (802.11ax 80 MHz per OpenWrt's `wifi-device` options). 2.4 GHz channel
+and `htmode` remain part of the router's base configuration.
+
 The module requires exactly one existing `wifi-device` with `band '2g'` and one
 with `band '5g'`. It discovers their section names rather than assuming radio
-numbering. Channel and other device settings remain part of the router's base
-configuration.
+numbering.
 
 The same transaction also manages `/etc/modules.conf` for Wireless Ethernet
 Dispatch (WED). The candidate ensures exactly one line:
