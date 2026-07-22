@@ -212,11 +212,61 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
         wan_ready,
     )
-    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", firewall_restart)
-    setup_start = source.index("run_and_confirm() {", apk_gate)
-    assert network_restart < wan_ready < firewall_restart < apk_gate < setup_start
+    ping_probe = source.index("ping -c 1 -W 2 10.0.2.2", firewall_restart)
+    wget_probe = source.index(
+        "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/", ping_probe
+    )
+    apk_gate = source.index("apk update >/tmp/vm-test-apk-update", wget_probe)
+    apk_retries = source.index('while [ "$apk_attempt" -lt 5 ]; do', apk_gate)
+    setup_start = source.index("run_and_confirm() {", apk_retries)
+    assert (
+        network_restart
+        < wan_ready
+        < firewall_restart
+        < ping_probe
+        < wget_probe
+        < apk_gate
+        < apk_retries
+        < setup_start
+    )
     assert "fail 'apk update failed after WAN recovery'" in source
     assert "failed to install VM guest packages" in source
+
+
+def test_vm_guest_restores_qemu_wan_before_second_setup_and_live_doh():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    helper_start = source.index(
+        "# After apply, WAN is static 192.168.1.2/gw 192.168.1.1 for the real ISP"
+    )
+    helper_end = source.index("\nrun_and_confirm() {", helper_start)
+    helper = source[helper_start:helper_end]
+    assert "restore_qemu_wan_dhcp() {" in helper
+    assert "uci set network.wan.proto='dhcp'" in helper
+    assert "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/" in helper
+    assert "ping -c 1 -W 2 10.0.2.2" in helper
+    assert "10.0.2.0/24" in helper
+    assert "10.0.2.2" in helper
+    assert "debug-3aae" not in helper
+
+    first_setup = source.index("run_and_confirm first")
+    wan_static = source.index(
+        '[ "$(uci -q get network.wan.ipaddr)" = 192.168.1.2 ]', first_setup
+    )
+    restore_before_second = source.index(
+        "restore_qemu_wan_dhcp 'before second installation'", wan_static
+    )
+    second_setup = source.index("run_and_confirm second", restore_before_second)
+    live = source.index('if [ "$profile" = live ]; then', second_setup)
+    restore_before_live = source.index(
+        "restore_qemu_wan_dhcp 'before live DoH'", live
+    )
+    assert first_setup < wan_static < restore_before_second < second_setup
+    assert live < restore_before_live
+
+
+def test_vm_guest_command_timeout_covers_two_setup_passes():
+    source = (REPO / "tools/run-vm-tests.py").read_text()
+    assert 'guest-tests.sh {args.profile}", 2400)' in source
 
 
 def test_vm_guest_synchronizes_static_wan_before_dot_probe():
