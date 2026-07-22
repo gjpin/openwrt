@@ -21,6 +21,7 @@ URL = f"https://downloads.openwrt.org/releases/25.12.4/targets/mediatek/filogic/
 EXPECTED = "8207da9d689f02d42833e4e8abc9eabb4ec63a433a7a26473296d3d2c489e257"
 PACKAGES = (
     "gawk grep sed coreutils-sort nano "
+    "chrony-nts "
     "https-dns-proxy luci-app-https-dns-proxy "
     "adblock-fast luci-app-adblock-fast wireguard-tools luci-proto-wireguard"
 )

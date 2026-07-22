@@ -15,14 +15,16 @@ then makes these coordinated configuration changes:
 - `https-dns-proxy` is prevented from changing dnsmasq or firewall state on
   service start and stop; those settings remain transaction-managed.
 - WAN stops accepting peer-provided DNS servers.
-- The system NTP server list is replaced with fixed IP addresses so time can be
-  established without depending on DNS.
 - Explicit rules for `pixel`, `pixelguest`, `pixelthings`, and `pixeliot`
   intercept TCP/UDP port 53 and reject direct TCP/UDP DNS-over-TLS on port 853.
 
+Time sync is handled by the [Encrypted NTP (NTS)](nts.md) module, not this
+one. NTS is primary; plain NTP-by-IP bootstrap in chrony still covers cold boot
+before DNS is available.
+
 Candidate validation requires exactly the four named proxy instances, their
 expected URLs, unique ports, bootstrap values, and matching dnsmasq forwards.
-The module changes the `https-dns-proxy`, `dhcp`, `system`, `network`, and
-`firewall` UCI packages as one transaction.
+The module changes the `https-dns-proxy`, `dhcp`, `network`, and `firewall`
+UCI packages as one transaction.
 
 [Back to the README](../README.md)

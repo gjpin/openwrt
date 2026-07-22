@@ -35,7 +35,7 @@ fail() {
     done
     fw4 print >&2 2>&1 || :
     nft list ruleset >&2 2>&1 || :
-    for service in network firewall sysntpd https-dns-proxy dnsmasq adblock-fast; do
+    for service in network firewall chronyd https-dns-proxy dnsmasq adblock-fast; do
         "/etc/init.d/$service" status >&2 2>&1 || :
     done
     logread >&2 2>&1 || :
@@ -58,7 +58,7 @@ fail() {
 }
 
 export_normalized_uci() {
-    for package in network firewall wireless dhcp system https-dns-proxy adblock-fast; do
+    for package in network firewall wireless dhcp system chrony https-dns-proxy adblock-fast; do
         uci show "$package"
     done |
         sed \
@@ -481,6 +481,13 @@ fw4 check || fail 'fw4 rejected installed configuration'
 grep -qx 'options mt7915e wed_enable=Y' /etc/modules.conf || fail 'WED is not enabled in modules.conf'
 wed_count=$(grep -c 'wed_enable=' /etc/modules.conf || :)
 [ "$wed_count" = 1 ] || fail 'modules.conf has duplicate WED options'
+[ "$(uci -q get chrony.cloudflare.nts)" = 1 ] || fail 'Cloudflare NTS server is missing'
+[ "$(uci -q get chrony.netnod.nts)" = 1 ] || fail 'Netnod NTS server is missing'
+[ "$(uci -q get chrony.time_nl.nts)" = 1 ] || fail 'time.nl NTS server is missing'
+[ "$(uci -q get chrony.bootstrap_1.nts)" = 0 ] || fail 'NTP bootstrap source is missing'
+[ "$(uci -q get chrony.dhcp_ntp_server.disabled)" = 1 ] || fail 'DHCP NTP sources are still enabled'
+/etc/init.d/sysntpd enabled >/dev/null 2>&1 && fail 'sysntpd is still enabled'
+/etc/init.d/chronyd enabled >/dev/null 2>&1 || fail 'chronyd is not enabled'
 for port in lan1 lan2 lan3 lan4 lan5; do
     uci -q get network.br_lan.ports | tr ' ' '\n' | grep -qx "$port" || fail "$port is absent from bridge"
 done

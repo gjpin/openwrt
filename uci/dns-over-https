@@ -1,4 +1,4 @@
-# Feature overlay: DoH upstreams, NTP bootstrap, and encrypted-DNS policy.
+# Feature overlay: DoH upstreams and encrypted-DNS policy.
 
 set https-dns-proxy.config='main'
 set https-dns-proxy.config.dnsmasq_config_update='-'
@@ -29,12 +29,6 @@ add_list dhcp.dnsmasq.server='127.0.0.1#5053'
 add_list dhcp.dnsmasq.server='127.0.0.1#5054'
 add_list dhcp.dnsmasq.server='127.0.0.1#5055'
 add_list dhcp.dnsmasq.server='127.0.0.1#5056'
-
-delete system.ntp.server
-add_list system.ntp.server='194.177.4.1'
-add_list system.ntp.server='213.222.217.11'
-add_list system.ntp.server='80.50.102.114'
-add_list system.ntp.server='193.219.28.60'
 
 set network.wan.peerdns='0'
 

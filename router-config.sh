@@ -14,7 +14,7 @@ INIT_SCRIPT=${ROUTER_CONFIG_INIT_SCRIPT:-/etc/init.d/router-config-rollback}
 LIBEXEC=${ROUTER_CONFIG_LIBEXEC:-/usr/libexec/router-config}
 NETWORK_INIT=${ROUTER_CONFIG_NETWORK_INIT:-/etc/init.d/network}
 FIREWALL_INIT=${ROUTER_CONFIG_FIREWALL_INIT:-/etc/init.d/firewall}
-SYSNTPD_INIT=${ROUTER_CONFIG_SYSNTPD_INIT:-/etc/init.d/sysntpd}
+CHRONYD_INIT=${ROUTER_CONFIG_CHRONYD_INIT:-/etc/init.d/chronyd}
 HTTPS_DNS_PROXY_INIT=${ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT:-/etc/init.d/https-dns-proxy}
 DNSMASQ_INIT=${ROUTER_CONFIG_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
 ADBLOCK_INIT=${ROUTER_CONFIG_ADBLOCK_INIT:-/etc/init.d/adblock-fast}
@@ -38,8 +38,8 @@ else
     MODULE_DIR=${LIBEXEC}.modules
 fi
 RUNTIME_MODULE_DIR=${ROUTER_CONFIG_RUNTIME_MODULE_DIR:-${LIBEXEC}.modules}
-UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast'
-MODULES='network firewall wireless dns-over-https adblock-fast wireguard'
+UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast chrony'
+MODULES='network firewall wireless nts dns-over-https adblock-fast wireguard'
 
 die() {
     printf 'router-config: %s\n' "$*" >&2
@@ -223,6 +223,7 @@ validate_candidate() {
     network_module_validate "$candidate_dir"
     firewall_module_validate "$candidate_dir"
     wireless_module_validate "$candidate_dir"
+    nts_validate "$candidate_dir"
     dns_over_https_validate "$candidate_dir"
     adblock_fast_validate "$candidate_dir"
     wireguard_validate "$candidate_dir"
@@ -297,7 +298,7 @@ prepare() {
         : >"$transaction_dir/backup/modules.conf"
         : >"$transaction_dir/candidate/modules.conf"
     fi
-    for overlay_name in network firewall wireless dns-over-https adblock-fast; do
+    for overlay_name in network firewall wireless nts dns-over-https adblock-fast; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
     wireguard_render_overlay "$UCI_DIR/wireguard" "$transaction_dir/overlay/wireguard"
@@ -306,6 +307,7 @@ prepare() {
     network_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/network"
     firewall_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/firewall"
     wireless_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireless"
+    nts_stage "$transaction_dir/candidate" "$transaction_dir/overlay/nts"
     dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
     adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
     wireguard_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireguard"
@@ -421,8 +423,8 @@ reload_services() {
         RELOAD_FAILED_STEP=firewall
         return 1
     fi
-    if ! "$SYSNTPD_INIT" restart; then
-        RELOAD_FAILED_STEP=sysntpd
+    if ! "$CHRONYD_INIT" restart; then
+        RELOAD_FAILED_STEP=chronyd
         return 1
     fi
     if ! restart_https_dns_proxy; then

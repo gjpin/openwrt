@@ -22,8 +22,9 @@ candidate can disconnect the router and require local recovery.
 - `modules/` holds internal shell modules sourced by `setup.sh` or
   `router-config.sh`. They are not standalone commands. Fixed order matters:
   base packages (setup only), then during prepare staging: network, firewall,
-  wireless, dns-over-https, adblock-fast, wireguard. Package install callbacks
-  for DNS, adblock, and WireGuard run from `setup.sh` before prepare.
+  wireless, nts, dns-over-https, adblock-fast, wireguard. Package install
+  callbacks for NTS, DNS, adblock, and WireGuard run from `setup.sh` before
+  prepare.
 - `uci/` holds feature-oriented UCI batch overlays applied onto a copy of the
   live config inside a candidate directory. They are not full replacements for
   `/etc/config/*`.
@@ -129,6 +130,10 @@ path over direct remote replacement of live config files.
   ports, and keep the two daemons from contending for the same ports.
   `https-dns-proxy` must not mutate dnsmasq or firewall outside the
   transaction (`dnsmasq_config_update='-'`, `force_dns='0'`, `notrack_dns='0'`).
+- Use `chrony-nts` (not plain `chrony`) for time sync. Disable BusyBox
+  `sysntpd` so only one NTP client runs. Keep NTS servers primary and retain
+  plain NTP-by-IP chrony sources for cold-boot bootstrap before DNS/DoH TLS.
+  Keep chrony client-only (no pool, no LAN `allow`, DHCP NTP disabled).
 
 ## Editing shell and modules
 
@@ -197,7 +202,11 @@ uci get firewall.defaults.flow_offloading
 uci get firewall.defaults.flow_offloading_hw
 grep -x 'options mt7915e wed_enable=Y' /etc/modules.conf
 uci show https-dns-proxy
-logread -e netifd -e firewall -e https-dns-proxy
+uci show chrony
+chronyc tracking
+chronyc -N authdata
+/etc/init.d/sysntpd enabled >/dev/null 2>&1 && echo 'sysntpd still enabled'
+logread -e netifd -e firewall -e https-dns-proxy -e chronyd
 ```
 
 Confirm from a client in each VLAN that DHCP and DNS work, expected internet

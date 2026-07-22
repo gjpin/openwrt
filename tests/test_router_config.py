@@ -185,9 +185,9 @@ def router():
     (proc_net / "udp").write_text("")
     for name in ("br-lan", "lan1", "lan2", "lan3", "lan4", "lan5"):
         (sys_net / name).mkdir(parents=True)
-    for name in ("network", "firewall", "wireless", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "nts", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "uci" / name, overlays / name)
-    for name in ("network", "firewall", "wireless", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "nts", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "modules" / f"{name}.sh", modules / f"{name}.sh")
 
     network = {
@@ -218,7 +218,23 @@ def router():
         "@https-dns-proxy[1]": {".type": "https-dns-proxy", "resolver_url": "https://dns.google/dns-query", "listen_port": "5054"},
         "unmanaged": {".type": "https-dns-proxy", "resolver_url": "https://example.invalid/dns-query", "listen_port": "5999"},
     }
-    for name, value in (("network", network), ("firewall", firewall), ("wireless", wireless), ("dhcp", dhcp), ("system", system), ("https-dns-proxy", https_dns_proxy), ("adblock-fast", adblock)):
+    chrony = {
+        "@pool[0]": {".type": "pool", "hostname": "2.openwrt.pool.ntp.org", "iburst": "1"},
+        "dhcp_ntp_server": {".type": "dhcp_ntp_server", "iburst": "1", "disabled": "0"},
+        "allow": {".type": "allow", "interface": "lan"},
+        "makestep": {".type": "makestep", "threshold": "1.0", "limit": "3"},
+        "nts": {".type": "nts", "rtccheck": "1", "systemcerts": "1"},
+    }
+    for name, value in (
+        ("network", network),
+        ("firewall", firewall),
+        ("wireless", wireless),
+        ("dhcp", dhcp),
+        ("system", system),
+        ("https-dns-proxy", https_dns_proxy),
+        ("adblock-fast", adblock),
+        ("chrony", chrony),
+    ):
         (config / name).write_text(json.dumps(value))
 
     write_executable(bin_dir / "uci", UCI_STUB)
@@ -262,7 +278,15 @@ fi
 exit 0
 '''
     services = {}
-    for name in ("network-init", "firewall-init", "sysntpd-init", "https-dns-proxy-init", "dnsmasq-init", "adblock-init"):
+    for name in (
+        "network-init",
+        "firewall-init",
+        "sysntpd-init",
+        "chronyd-init",
+        "https-dns-proxy-init",
+        "dnsmasq-init",
+        "adblock-init",
+    ):
         services[name] = bin_dir / name
         write_executable(services[name], service_source)
 
@@ -283,6 +307,7 @@ exit 0
         "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
         "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
         "ROUTER_CONFIG_SYSNTPD_INIT": str(services["sysntpd-init"]),
+        "ROUTER_CONFIG_CHRONYD_INIT": str(services["chronyd-init"]),
         "ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT": str(services["https-dns-proxy-init"]),
         "ROUTER_CONFIG_DNSMASQ_INIT": str(services["dnsmasq-init"]),
         "ROUTER_CONFIG_ADBLOCK_INIT": str(services["adblock-init"]),
@@ -394,6 +419,26 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
             ".type": "https-dns-proxy", "resolver_url": url, "listen_port": port,
             "bootstrap_dns": "9.9.9.11,1.1.1.1,8.8.8.8",
         }
+    chrony = json.loads((transaction_dir / "candidate" / "chrony").read_text())
+    assert chrony["cloudflare"] == {
+        ".type": "server", "hostname": "time.cloudflare.com", "iburst": "1", "nts": "1",
+    }
+    assert chrony["netnod"] == {
+        ".type": "server", "hostname": "nts.netnod.se", "iburst": "1", "nts": "1",
+    }
+    assert chrony["time_nl"] == {
+        ".type": "server", "hostname": "ntppool1.time.nl", "iburst": "1", "nts": "1",
+    }
+    assert chrony["bootstrap_1"] == {
+        ".type": "server", "hostname": "194.177.4.1", "iburst": "1", "nts": "0",
+    }
+    assert chrony["dhcp_ntp_server"]["disabled"] == "1"
+    assert "@pool[0]" not in chrony
+    assert "allow" not in chrony
+    assert chrony["nts"]["rtccheck"] == "1"
+    assert chrony["nts"]["systemcerts"] == "1"
+    system = json.loads((transaction_dir / "candidate" / "system").read_text())
+    assert system["ntp"]["server"] == ["old"]
     adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
     sources = {name: section for name, section in adblock.items() if section[".type"] == "file_url"}
     assert "unmanaged" not in adblock
@@ -429,10 +474,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
 def test_repeated_prepare_is_idempotent(router):
     _, config, backups, _, env = router
     _, first = prepare(env)
-    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast"):
+    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony"):
         shutil.copy(backups / first / "candidate" / name, config / name)
     _, second = prepare(env)
-    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast"):
+    for name in ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony"):
         data = json.loads((backups / second / "candidate" / name).read_text())
         assert len(data) == len(set(data))
     assert json.loads((backups / second / "candidate" / "network").read_text())["br_lan"]["stp"] == "1"
@@ -640,7 +685,7 @@ def test_missing_transaction_module_is_rejected(router):
 
 def test_apply_confirm_and_manual_rollback(router):
     _, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
@@ -727,7 +772,7 @@ def test_apply_fw4_failure_restores_backup(router):
 
 def test_https_dns_proxy_stop_failure_restores_backup(router):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
     originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
     fail = root / "https-stop-fail"
@@ -794,7 +839,7 @@ def test_https_dns_proxy_nonzero_restart_is_accepted_when_all_listeners_are_read
     ("network-init", "reload", "network"),
     ("wifi", "reload", "wifi"),
     ("firewall-init", "reload", "firewall"),
-    ("sysntpd-init", "restart", "sysntpd"),
+    ("chronyd-init", "restart", "chronyd"),
     ("https-dns-proxy-init", "restart", "https-dns-proxy"),
     ("dnsmasq-init", "restart", "dnsmasq"),
     ("adblock-init", "restart", "adblock-fast"),
@@ -803,7 +848,7 @@ def test_each_coordinated_service_failure_is_named_and_restores_every_file(
     router, service_name, action, failure_label
 ):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
     originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
     fail = root / f"{service_name}-fail"
@@ -842,7 +887,7 @@ def test_transaction_tampering_is_rejected(router):
 
 def test_partial_candidate_installation_failure_restores_all_packages(router):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony")
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
@@ -980,24 +1025,28 @@ def test_https_dns_proxy_validation_and_forward_mismatch_are_preapply_failures(r
 
 def test_feature_install_callbacks_only_install_and_enable(router):
     root, config, _, _, env = router
-    names = ("network", "firewall", "dhcp", "https-dns-proxy", "adblock-fast")
+    names = ("network", "firewall", "dhcp", "https-dns-proxy", "adblock-fast", "chrony")
     before = {name: (config / name).read_text() for name in names}
     apk_log = root / "apk.log"
     init_log = root / "init.log"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{apk_log}'\n")
     init = root / "bin" / "init-install"
     write_executable(init, f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{init_log}'\n")
+    env["ROUTER_CONFIG_SYSNTPD_INIT"] = str(init)
+    env["ROUTER_CONFIG_CHRONYD_INIT"] = str(init)
     env["ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT"] = str(init)
     env["ROUTER_CONFIG_ADBLOCK_INIT"] = str(init)
+    run_module(env, "nts.sh", "nts_install")
     run_module(env, "dns-over-https.sh", "dns_over_https_install")
     run_module(env, "adblock-fast.sh", "adblock_fast_install")
     run_module(env, "wireguard.sh", "wireguard_install")
     assert apk_log.read_text().splitlines() == [
+        "add chrony-nts",
         "add https-dns-proxy luci-app-https-dns-proxy",
         "add adblock-fast luci-app-adblock-fast",
         "add wireguard-tools luci-proto-wireguard",
     ]
-    assert init_log.read_text().splitlines() == ["enable", "enable"]
+    assert init_log.read_text().splitlines() == ["stop", "disable", "enable", "enable", "enable"]
     assert {name: (config / name).read_text() for name in names} == before
 
 
@@ -1016,6 +1065,7 @@ def test_all_package_installation_uses_apk(router):
     )
     assert "op" + "kg" not in project_shell
     assert "dns" + "crypt" not in project_shell.lower()
+    assert "apk add chrony-nts" in project_shell
     assert "apk add https-dns-proxy luci-app-https-dns-proxy" in project_shell
     assert "apk add wireguard-tools luci-proto-wireguard" in project_shell
 
@@ -1025,6 +1075,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
     calls = [
         'router-config.sh" check-base',
         "base_packages_run",
+        "nts_install",
         "dns_over_https_install",
         "adblock_fast_install",
         "wireguard_install",
@@ -1033,7 +1084,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
     positions = [source.rindex(call) for call in calls]
     assert positions == sorted(positions)
     for name in (
-        "base-packages", "network", "firewall", "wireless",
+        "base-packages", "network", "firewall", "wireless", "nts",
         "dns-over-https", "adblock-fast", "wireguard",
     ):
         assert f"modules/{name}.sh" in source
@@ -1045,6 +1096,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
     assert "dns_over_https_run" not in source
     assert "adblock_fast_run" not in source
     assert "wireguard_run" not in source
+    assert "nts_run" not in source
     assert "adblock selector" not in (REPO / "README.md").read_text().lower()
 
     transaction_source = (REPO / "router-config.sh").read_text()

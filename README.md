@@ -13,6 +13,7 @@ confirmed within five minutes.
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
 - HTTPS DNS proxy upstreams with DNS bypass controls
+- Authenticated NTP via `chrony-nts` (NTS), with plain NTP-by-IP cold-boot bootstrap
 - DNS-based ad and tracker blocking
 - An IPv4-only WireGuard server attached to the trusted Pixel zone
 - Static IPv4 WAN behind an ISP router (`192.168.1.2/24`, gateway
@@ -172,6 +173,7 @@ the transaction helper. They are not standalone commands.
 - [Network and DHCP](docs/network.md)
 - [Firewall](docs/firewall.md)
 - [Wireless](docs/wireless.md)
+- [Encrypted NTP (NTS)](docs/nts.md)
 - [Encrypted DNS](docs/dns-over-https.md)
 - [Ad blocking](docs/adblock-fast.md)
 - [WireGuard](docs/wireguard.md)

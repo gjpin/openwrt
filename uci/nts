@@ -1,0 +1,48 @@
+# Feature overlay: chrony-nts NTS servers plus plain NTP-by-IP cold-boot bootstrap.
+
+set chrony.cloudflare='server'
+set chrony.cloudflare.hostname='time.cloudflare.com'
+set chrony.cloudflare.iburst='1'
+set chrony.cloudflare.nts='1'
+
+set chrony.netnod='server'
+set chrony.netnod.hostname='nts.netnod.se'
+set chrony.netnod.iburst='1'
+set chrony.netnod.nts='1'
+
+set chrony.time_nl='server'
+set chrony.time_nl.hostname='ntppool1.time.nl'
+set chrony.time_nl.iburst='1'
+set chrony.time_nl.nts='1'
+
+set chrony.bootstrap_1='server'
+set chrony.bootstrap_1.hostname='194.177.4.1'
+set chrony.bootstrap_1.iburst='1'
+set chrony.bootstrap_1.nts='0'
+
+set chrony.bootstrap_2='server'
+set chrony.bootstrap_2.hostname='213.222.217.11'
+set chrony.bootstrap_2.iburst='1'
+set chrony.bootstrap_2.nts='0'
+
+set chrony.bootstrap_3='server'
+set chrony.bootstrap_3.hostname='80.50.102.114'
+set chrony.bootstrap_3.iburst='1'
+set chrony.bootstrap_3.nts='0'
+
+set chrony.bootstrap_4='server'
+set chrony.bootstrap_4.hostname='193.219.28.60'
+set chrony.bootstrap_4.iburst='1'
+set chrony.bootstrap_4.nts='0'
+
+set chrony.dhcp_ntp_server='dhcp_ntp_server'
+set chrony.dhcp_ntp_server.iburst='1'
+set chrony.dhcp_ntp_server.disabled='1'
+
+set chrony.makestep='makestep'
+set chrony.makestep.threshold='1.0'
+set chrony.makestep.limit='3'
+
+set chrony.nts='nts'
+set chrony.nts.rtccheck='1'
+set chrony.nts.systemcerts='1'

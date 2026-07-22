@@ -48,11 +48,11 @@ validate_wireguard_key() {
 validate_repository() {
     for repository_file in \
         router-config.sh router-config-rollback.init \
-        uci/network uci/firewall uci/wireless uci/dns-over-https \
+        uci/network uci/firewall uci/wireless uci/nts uci/dns-over-https \
         uci/adblock-fast uci/wireguard \
         modules/base-packages.sh modules/network.sh modules/firewall.sh \
-        modules/wireless.sh modules/dns-over-https.sh modules/adblock-fast.sh \
-        modules/wireguard.sh; do
+        modules/wireless.sh modules/nts.sh modules/dns-over-https.sh \
+        modules/adblock-fast.sh modules/wireguard.sh; do
         [ -f "$SCRIPT_DIR/$repository_file" ] && [ -s "$SCRIPT_DIR/$repository_file" ] ||
             die "repository file is missing or empty: $repository_file"
     done
@@ -119,6 +119,8 @@ export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK COUNTRY CHANNEL
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/modules/base-packages.sh"
 # shellcheck source=/dev/null
+. "$SCRIPT_DIR/modules/nts.sh"
+# shellcheck source=/dev/null
 . "$SCRIPT_DIR/modules/dns-over-https.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/modules/adblock-fast.sh"
@@ -126,6 +128,7 @@ export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK COUNTRY CHANNEL
 . "$SCRIPT_DIR/modules/wireguard.sh"
 
 base_packages_run
+nts_install
 dns_over_https_install
 adblock_fast_install
 wireguard_install
