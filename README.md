@@ -46,7 +46,9 @@ must run on the target router as `root`; do not run it on a workstation.
 1. Open two local or recovery-capable sessions to the router. Before apply,
    `ROUTER_ADDRESS` is typically the stock LAN address (`192.168.1.1`). After
    apply, use the Pixel gateway (`192.168.8.1`) for management and confirmation.
-   In the first session, create a backup:
+   Plug the WAN port into the ISP router and confirm stock WAN already has
+   working internet; `uclient-fetch` and `apk` need it before setup mutates
+   anything. In the first session, create a backup:
 
    ```sh
    ssh root@ROUTER_ADDRESS
@@ -101,15 +103,24 @@ must run on the target router as `root`; do not run it on a workstation.
    ```
 
    Keep `$client_private` for the peer device; only its public key is exported as
-   `VPN_PUB`.
+   `VPN_PUB`. After apply, WAN is static `192.168.1.2/24` behind the ISP
+   router. For inbound WireGuard peers, add an ISP-router UDP port forward to
+   `192.168.1.2` for `VPN_PORT`.
 
-4. Keep the first session open. Test management access, DHCP, DNS, and expected
-   internet access from the appropriate VLANs. In the second recovery-capable
-   session, run the exact confirmation command printed by setup:
+4. After apply, stock LAN `192.168.1.1` is gone, so the first SSH session usually
+   drops. That is expected: the pending watchdog still runs. Open (or keep) the
+   second recovery-capable session on the Pixel gateway (`192.168.8.1`, Ethernet
+   on a LAN port), test management access, DHCP, DNS, and expected internet
+   access from the appropriate VLANs, then run the exact confirmation command
+   printed by setup:
 
    ```sh
    /usr/libexec/router-config confirm TRANSACTION_ID
    ```
+
+   After confirm, reboot so Wireless Ethernet Dispatch (WED,
+   `mt7915e wed_enable`) loads. Do not reboot while the transaction is still
+   pending.
 
 If confirmation is not received within five minutes, or the router reboots with
 a pending transaction, the saved configuration is restored. A confirmed change
