@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import shutil
 import subprocess
 import tempfile
@@ -258,6 +259,15 @@ def router():
 
     write_executable(bin_dir / "uci", UCI_STUB)
     write_executable(bin_dir / "ubus", "#!/bin/sh\nexit 0\n")
+    write_executable(bin_dir / "setsid", '''#!/usr/bin/env python3
+import os
+import sys
+
+if os.environ.get("SETSID_FAIL") == "1":
+    sys.exit(1)
+os.setsid()
+os.execvp(sys.argv[1], sys.argv[1:])
+''')
     write_executable(bin_dir / "wifi", '''#!/bin/sh
 if [ -e "${WIFI_FAIL_ONCE:-/nonexistent}" ]; then
     rm -f "$WIFI_FAIL_ONCE"
@@ -336,6 +346,8 @@ exit 0
         "ROUTER_CONFIG_ADBLOCK_INIT": str(services["adblock-init"]),
         "ROUTER_CONFIG_TIMEOUT": "2",
         "ROUTER_CONFIG_POLL_INTERVAL": "0.05",
+        "ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS": "500",
+        "ROUTER_CONFIG_WATCHDOG_READY_INTERVAL": "0.01",
         "PIXEL_WIFI_PASSWORD": "pixel-secret-123",
         "THINGS_WIFI_PASSWORD": "things-secret-123",
         "GUEST_WIFI_PASSWORD": "guest-secret-123",
@@ -635,6 +647,15 @@ def test_custom_stock_base_is_rejected_before_backup(router):
     assert not backups.exists()
 
 
+def test_missing_setsid_is_rejected_before_backup(router):
+    root, _, backups, _, env = router
+    (root / "bin" / "setsid").unlink()
+    result = run_router(env, "check-base", check=False)
+    assert result.returncode != 0
+    assert "required command not found: setsid" in result.stderr
+    assert not backups.exists()
+
+
 def test_wireless_assignment_follows_bands_not_radio_numbers(router):
     _, config, backups, _, env = router
     wireless = json.loads((config / "wireless").read_text())
@@ -744,6 +765,7 @@ def test_missing_transaction_module_is_rejected(router):
 
 def test_apply_confirm_and_manual_rollback(router):
     _, config, backups, _, env = router
+    env["ROUTER_CONFIG_TIMEOUT"] = "2"
     names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
@@ -754,21 +776,27 @@ def test_apply_confirm_and_manual_rollback(router):
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     pending = backups / transaction / "pending"
-    for _ in range(100):
+    for _ in range(300):
         if pending.exists(): break
         time.sleep(0.02)
     assert pending.exists()
     lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
-    for _ in range(100):
+    for _ in range(300):
         if not lock.exists(): break
         time.sleep(0.02)
     assert not lock.exists()
+    watchdog_pid = backups / transaction / "watchdog.pid"
+    assert watchdog_pid.read_text().strip().isdigit()
     confirm = run_router(env, "confirm", transaction)
     stdout, stderr = process.communicate(timeout=5)
     assert process.returncode == 0, stderr
     assert "confirm" in stdout
     assert "reboot after confirm" in stdout
     assert "reboot required for WED" in confirm.stdout
+    for _ in range(300):
+        if not watchdog_pid.exists(): break
+        time.sleep(0.02)
+    assert not watchdog_pid.exists()
     assert json.loads((config / "network").read_text())["pixel"]["ipaddr"] == "192.168.8.1"
     assert json.loads((config / "network").read_text())["wan"]["ipaddr"] == "192.168.1.2"
     assert json.loads((config / "network").read_text())["wan"]["gateway"] == "192.168.1.1"
@@ -794,15 +822,92 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     assert (config / "network").read_text() == original
     assert modules_conf.read_text() == original_modules
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
+    assert not (backups / transaction / "pending").exists()
+    assert not (backups / transaction / "watchdog.pid").exists()
 
     _, transaction = prepare(env)
     shutil.copy(backups / transaction / "candidate" / "network", config / "network")
     shutil.copy(backups / transaction / "candidate" / "modules.conf", modules_conf)
     (backups / transaction / "pending").touch()
     (backups / transaction / "state").write_text("pending\n")
+    (backups / transaction / "watchdog.pid").write_text("999999\n")
     run_router(env, "_recover-pending")
     assert (config / "network").read_text() == original
     assert modules_conf.read_text() == original_modules
+    assert (backups / transaction / "state").read_text().strip() == "rolledback"
+    assert not (backups / transaction / "pending").exists()
+    assert not (backups / transaction / "watchdog.pid").exists()
+
+
+def test_watchdog_survives_apply_session_hangup_and_restores_every_file(router):
+    _, config, backups, _, env = router
+    names = (
+        "network", "firewall", "wireless", "dhcp", "system",
+        "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear",
+    )
+    originals = {name: (config / name).read_text() for name in names}
+    modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
+    original_modules = modules_conf.read_text()
+    env["ROUTER_CONFIG_TIMEOUT"] = "2"
+    _, transaction = prepare(env)
+    process = subprocess.Popen(
+        [str(REPO / "router-config.sh"), "apply", transaction],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    transaction_dir = backups / transaction
+    pid_file = transaction_dir / "watchdog.pid"
+    lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
+    watchdog_process = None
+    for _ in range(500):
+        if pid_file.exists() and pid_file.read_text().strip().isdigit() and not lock.exists():
+            watchdog_process = int(pid_file.read_text().strip())
+            break
+        time.sleep(0.01)
+    assert watchdog_process is not None
+    assert os.getsid(watchdog_process) != os.getsid(process.pid)
+
+    os.killpg(os.getpgid(process.pid), signal.SIGHUP)
+    _, stderr = process.communicate(timeout=5)
+    assert process.returncode != 0, stderr
+    os.kill(watchdog_process, 0)
+
+    for _ in range(500):
+        if (transaction_dir / "state").read_text().strip() == "rolledback":
+            break
+        time.sleep(0.01)
+    assert (transaction_dir / "state").read_text().strip() == "rolledback"
+    assert {name: (config / name).read_text() for name in names} == originals
+    assert modules_conf.read_text() == original_modules
+    assert not (transaction_dir / "pending").exists()
+    assert not pid_file.exists()
+
+
+def test_watchdog_start_failure_restores_every_file(router):
+    _, config, backups, _, env = router
+    names = (
+        "network", "firewall", "wireless", "dhcp", "system",
+        "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear",
+    )
+    originals = {name: (config / name).read_text() for name in names}
+    modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
+    original_modules = modules_conf.read_text()
+    env["SETSID_FAIL"] = "1"
+    env["ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS"] = "3"
+    env["ROUTER_CONFIG_WATCHDOG_READY_INTERVAL"] = "0.01"
+    _, transaction = prepare(env)
+    result = run_router(env, "apply", transaction, check=False)
+    transaction_dir = backups / transaction
+    assert result.returncode != 0
+    assert "could not start rollback watchdog; backups restored" in result.stderr
+    assert {name: (config / name).read_text() for name in names} == originals
+    assert modules_conf.read_text() == original_modules
+    assert (transaction_dir / "state").read_text().strip() == "rolledback"
+    assert not (transaction_dir / "pending").exists()
+    assert not (transaction_dir / "watchdog.pid").exists()
 
 
 def test_fw4_failure_does_not_change_live_configuration(router):
@@ -858,7 +963,7 @@ def test_https_dns_proxy_nonzero_stop_is_accepted_when_all_listeners_stopped(rou
     )
     pending = backups / transaction / "pending"
     lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
-    for _ in range(100):
+    for _ in range(300):
         if pending.exists() and not lock.exists(): break
         time.sleep(0.02)
     assert pending.exists() and not lock.exists()
@@ -883,7 +988,7 @@ def test_https_dns_proxy_nonzero_restart_is_accepted_when_all_listeners_are_read
     )
     pending = backups / transaction / "pending"
     lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
-    for _ in range(100):
+    for _ in range(300):
         if pending.exists() and not lock.exists(): break
         time.sleep(0.02)
     assert pending.exists() and not lock.exists()

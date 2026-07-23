@@ -24,6 +24,8 @@ PROC_NET_DIR=${ROUTER_CONFIG_PROC_NET_DIR:-/proc/net}
 MODULES_CONF=${ROUTER_CONFIG_MODULES_CONF:-/etc/modules.conf}
 TIMEOUT=${ROUTER_CONFIG_TIMEOUT:-300}
 POLL_INTERVAL=${ROUTER_CONFIG_POLL_INTERVAL:-1}
+WATCHDOG_READY_ATTEMPTS=${ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS:-10}
+WATCHDOG_READY_INTERVAL=${ROUTER_CONFIG_WATCHDOG_READY_INTERVAL:-1}
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 if [ -n "${ROUTER_CONFIG_UCI_DIR:-}" ]; then
     UCI_DIR=$ROUTER_CONFIG_UCI_DIR
@@ -65,7 +67,7 @@ require_commands() {
 }
 
 require_base_commands() {
-    for command_name in uci ubus; do
+    for command_name in uci ubus setsid; do
         command -v "$command_name" >/dev/null 2>&1 || die "required command not found: $command_name"
     done
 }
@@ -73,6 +75,15 @@ require_base_commands() {
 remove_lock_dir() {
     rmdir "$LOCK_DIR" 2>/dev/null || rm -rf "$LOCK_DIR"
     [ ! -e "$LOCK_DIR" ] || die "failed to remove lock directory: $LOCK_DIR"
+}
+
+clear_lock_traps() {
+    if [ "${ignore_lock_hup:-0}" = 1 ]; then
+        trap - EXIT INT TERM
+        trap '' HUP
+    else
+        trap - EXIT HUP INT TERM
+    fi
 }
 
 acquire_lock() {
@@ -83,7 +94,12 @@ acquire_lock() {
         lock_attempt=$((lock_attempt + 1))
         if mkdir "$LOCK_DIR" 2>/dev/null; then
             printf '%s\n' "$$" >"$LOCK_DIR/pid"
-            trap 'release_lock' EXIT HUP INT TERM
+            if [ "${ignore_lock_hup:-0}" = 1 ]; then
+                trap 'release_lock' EXIT INT TERM
+                trap '' HUP
+            else
+                trap 'release_lock' EXIT HUP INT TERM
+            fi
             return
         fi
         lock_pid=
@@ -109,14 +125,14 @@ release_lock() {
         if [ -r "$LOCK_DIR/pid" ]; then
             lock_pid=$(sed -n '1p' "$LOCK_DIR/pid")
             if [ "$lock_pid" != "$$" ]; then
-                trap - EXIT HUP INT TERM
+                clear_lock_traps
                 return 0
             fi
         fi
         rm -f "$LOCK_DIR/pid"
         remove_lock_dir
     fi
-    trap - EXIT HUP INT TERM
+    clear_lock_traps
 }
 
 uci_get() {
@@ -474,16 +490,85 @@ rollback_locked() {
     info "rolled back transaction $transaction_id"
 }
 
+watchdog_pid() {
+    pid_file=$1
+    [ -r "$pid_file" ] || return 1
+    published_pid=$(sed -n '1p' "$pid_file")
+    case $published_pid in
+        '' | *[!0-9]*) return 1 ;;
+    esac
+    printf '%s\n' "$published_pid"
+}
+
+remove_own_watchdog_pid() {
+    pid_file=$1
+    published_pid=$(watchdog_pid "$pid_file") || return 0
+    [ "$published_pid" = "$$" ] || return 0
+    rm -f "$pid_file"
+}
+
 watchdog() {
     transaction_id=$1
-    sleep "$TIMEOUT"
     transaction_dir=$TX_ROOT/$transaction_id
-    [ -f "$transaction_dir/pending" ] || exit 0
+    pid_file=$transaction_dir/watchdog.pid
+    trap '' HUP
+    printf '%s\n' "$$" >"$pid_file"
+    chmod 600 "$pid_file"
+    sleep "$TIMEOUT"
+    if [ ! -f "$transaction_dir/pending" ]; then
+        remove_own_watchdog_pid "$pid_file"
+        exit 0
+    fi
+    ignore_lock_hup=1
     acquire_lock
     if [ -f "$transaction_dir/pending" ]; then
         rollback_locked "$transaction_id"
     fi
     release_lock
+    trap '' HUP
+    remove_own_watchdog_pid "$pid_file"
+}
+
+terminate_watchdog_startup() {
+    if [ -n "${watchdog_launcher_pid:-}" ]; then
+        kill "$watchdog_launcher_pid" 2>/dev/null || :
+    fi
+    published_pid=$(watchdog_pid "$transaction_dir/watchdog.pid") || published_pid=
+    if [ -n "$published_pid" ]; then
+        kill "$published_pid" 2>/dev/null || :
+    fi
+}
+
+apply_interrupted() {
+    if [ "${watchdog_ready:-0}" = 1 ]; then
+        release_lock
+        exit 1
+    fi
+    terminate_watchdog_startup
+    restore_transaction "$transaction_dir"
+    release_lock
+    exit 1
+}
+
+start_watchdog() {
+    : >"$transaction_dir/watchdog.pid"
+    chmod 600 "$transaction_dir/watchdog.pid"
+    setsid "$LIBEXEC" _watchdog "$transaction_id" </dev/null >/dev/null 2>&1 &
+    watchdog_launcher_pid=$!
+    ready_attempt=0
+    while [ "$ready_attempt" -lt "$WATCHDOG_READY_ATTEMPTS" ]; do
+        ready_attempt=$((ready_attempt + 1))
+        published_pid=$(watchdog_pid "$transaction_dir/watchdog.pid") || published_pid=
+        if [ -n "$published_pid" ] && kill -0 "$published_pid" 2>/dev/null; then
+            watchdog_ready=1
+            watchdog_launcher_pid=
+            return 0
+        fi
+        [ "$ready_attempt" -lt "$WATCHDOG_READY_ATTEMPTS" ] || break
+        sleep "$WATCHDOG_READY_INTERVAL"
+    done
+    terminate_watchdog_startup
+    return 1
 }
 
 apply_transaction() {
@@ -499,7 +584,9 @@ apply_transaction() {
     printf '%s\n' pending >"$transaction_dir/state"
     chmod 600 "$transaction_dir/pending" "$transaction_dir/state"
 
-    trap 'restore_transaction "$transaction_dir"; release_lock; exit 1' HUP INT TERM
+    watchdog_launcher_pid=
+    watchdog_ready=0
+    trap 'apply_interrupted' HUP INT TERM
     # https-dns-proxy registers dynamic firewall rules through ubus. Remove
     # rules derived from the old zone layout before installing and reloading
     # the candidate firewall configuration.
@@ -524,8 +611,10 @@ apply_transaction() {
         restore_transaction "$transaction_dir"
         die "service reload failed at $failed_step; backups restored"
     fi
-    "$LIBEXEC" _watchdog "$transaction_id" >/dev/null 2>&1 &
-    printf '%s\n' "$!" >"$transaction_dir/watchdog.pid"
+    if ! start_watchdog; then
+        restore_transaction "$transaction_dir"
+        die 'could not start rollback watchdog; backups restored'
+    fi
     release_lock
     trap - EXIT HUP INT TERM
 

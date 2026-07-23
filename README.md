@@ -122,9 +122,12 @@ must run on the target router as `root`; do not run it on a workstation.
    `mt7915e wed_enable`) loads. Do not reboot while the transaction is still
    pending.
 
-If confirmation is not received within five minutes, or the router reboots with
-a pending transaction, the saved configuration is restored. A confirmed change
-can be reverted later with:
+If confirmation is not received within five minutes, a detached watchdog in
+its own session restores the saved configuration. The watchdog ignores SIGHUP,
+so closing or losing the applying SSH session does not cancel timeout rollback.
+If the router reboots while a transaction is pending, early-boot recovery
+remains the fallback and restores the same backup. A confirmed change can be
+reverted later with:
 
 ```sh
 /usr/libexec/router-config rollback TRANSACTION_ID

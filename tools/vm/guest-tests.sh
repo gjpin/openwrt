@@ -58,13 +58,14 @@ fail() {
 }
 
 export_normalized_uci() {
-    for package in network firewall wireless dhcp system chrony https-dns-proxy adblock-fast; do
+    for package in network firewall wireless dhcp system chrony https-dns-proxy adblock-fast uhttpd dropbear; do
         uci show "$package"
     done |
         sed \
             -e '/\.private_key=/d' \
             -e '/\.preshared_key=/d' \
             -e '/^wireless\.[^.]*\.key=/d' \
+            -e '/^dhcp\.dnsmasq\.serversfile=/d' \
             -e '/^adblock-fast\.[^.]*\.size=/d' |
         awk '
             {
@@ -957,10 +958,62 @@ fw4 print | grep -q 'Allow-WireGuard' || fail 'WAN WireGuard rule is absent from
 # Exercise a real watchdog rollback and a missing-port preflight rejection.
 prepare_output=$(./router-config.sh prepare --recovery-ready)
 timeout_tx=$(printf '%s\n' "$prepare_output" | tail -n 1)
-if ROUTER_CONFIG_TIMEOUT=2 ROUTER_CONFIG_POLL_INTERVAL=1 /usr/libexec/router-config apply "$timeout_tx"; then
-    fail 'unconfirmed transaction unexpectedly succeeded'
+export_normalized_uci >/tmp/timeout-before.uci
+cp /etc/modules.conf /tmp/timeout-before.modules.conf
+rm -f /tmp/timeout-apply.pid /tmp/timeout-apply.log
+# shellcheck disable=SC2016 # Expanded by the inner shell after setsid.
+setsid sh -c '
+    printf "%s\n" "$$" >/tmp/timeout-apply.pid
+    exec env ROUTER_CONFIG_TIMEOUT=5 ROUTER_CONFIG_POLL_INTERVAL=1 \
+        ROUTER_CONFIG_ADBLOCK_INIT=/bin/true \
+        /usr/libexec/router-config apply "$1"
+' sh "$timeout_tx" >/tmp/timeout-apply.log 2>&1 &
+timeout_launcher_pid=$!
+timeout_ready=0
+timeout_attempt=0
+while [ "$timeout_attempt" -lt 120 ]; do
+    timeout_attempt=$((timeout_attempt + 1))
+    timeout_pid_file=/root/router-config-backups/$timeout_tx/watchdog.pid
+    if [ -s /tmp/timeout-apply.pid ] &&
+        [ -s "$timeout_pid_file" ] &&
+        [ ! -e /var/lock/router-config.lock ]; then
+        timeout_ready=1
+        break
+    fi
+    sleep 1
+done
+[ "$timeout_ready" = 1 ] || fail 'watchdog did not become ready for session-loss test'
+timeout_apply_pid=$(sed -n '1p' /tmp/timeout-apply.pid)
+timeout_watchdog_pid=$(sed -n '1p' "$timeout_pid_file")
+timeout_apply_sid=$(awk '{ print $6 }' "/proc/$timeout_apply_pid/stat")
+timeout_watchdog_sid=$(awk '{ print $6 }' "/proc/$timeout_watchdog_pid/stat")
+[ "$timeout_watchdog_sid" != "$timeout_apply_sid" ] ||
+    fail 'watchdog remained in the apply session'
+kill -HUP -"$timeout_apply_pid"
+wait "$timeout_launcher_pid" 2>/dev/null || :
+if kill -0 "$timeout_apply_pid" 2>/dev/null; then
+    fail 'foreground apply survived session hangup'
 fi
+kill -0 "$timeout_watchdog_pid" 2>/dev/null ||
+    fail 'watchdog did not survive session hangup'
+timeout_attempt=0
+while [ "$timeout_attempt" -lt 180 ]; do
+    timeout_attempt=$((timeout_attempt + 1))
+    [ "$(cat "/root/router-config-backups/$timeout_tx/state")" = rolledback ] && break
+    sleep 1
+done
 [ "$(cat "/root/router-config-backups/$timeout_tx/state")" = rolledback ] || fail 'watchdog did not roll back'
+export_normalized_uci >/tmp/timeout-after.uci
+if ! cmp -s /tmp/timeout-before.uci /tmp/timeout-after.uci; then
+    diff -u /tmp/timeout-before.uci /tmp/timeout-after.uci \
+        >/tmp/vm-test-failure-detail 2>&1 || :
+    fail 'watchdog did not restore every configuration file'
+fi
+cmp -s /tmp/timeout-before.modules.conf /etc/modules.conf ||
+    fail 'watchdog did not restore modules.conf'
+[ ! -e "/root/router-config-backups/$timeout_tx/pending" ] ||
+    fail 'watchdog left the pending marker behind'
+[ ! -e "$timeout_pid_file" ] || fail 'watchdog left its PID marker behind'
 ip link del lan5
 if ./router-config.sh prepare --recovery-ready >/tmp/missing-port.log 2>&1; then
     fail 'missing lan5 passed preflight'
