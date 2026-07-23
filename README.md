@@ -14,7 +14,8 @@ confirmed within five minutes.
 - Allowlisted inter-VLAN and internet access
 - LuCI and SSH bound to the Pixel gateway only (`192.168.8.1` / `pixel`)
 - HTTPS DNS proxy upstreams with DNS bypass controls (DoT/DoQ port rejects)
-- Authenticated NTP via `chrony-nts` (NTS), with plain NTP-by-IP cold-boot bootstrap
+- Preferred authenticated NTP via `chrony-nts` (NTS), with unauthenticated
+  NTP-by-IP cold-boot and outage fallback
 - DNS-based ad and tracker blocking
 - An IPv4-only WireGuard server attached to the trusted Pixel zone
 - Static IPv4 WAN behind an ISP router (`192.168.1.2/24`, gateway
@@ -135,7 +136,9 @@ reverted later with:
 
 Package installation and init-service enablement happen before the protected
 configuration transaction and are not removed by rollback. Backups are kept in
-`/root/router-config-backups`; retain the separate off-router backup too.
+`/root/router-config-backups`; the transaction also protects
+`/etc/modules.conf` and `/etc/chrony/chrony.conf`. Retain the separate
+off-router backup too.
 
 ## Development checks
 
@@ -161,9 +164,11 @@ python3 tools/run-vm-tests.py --profile stable
 ```
 
 Use `--keep-workdir` to retain the disposable disk and redacted serial log after
-a run. `--profile live` additionally checks every external DoH provider and
-blocklist URL; run it from the manual CI workflow when needed. On Linux x86_64,
-the exact target package/flash-fit gate is:
+a run. `--profile live` additionally tests bad-clock synchronization from a
+numeric NTP source while DNS/DoH is stopped, subsequent NTS authentication,
+every external DoH provider, and blocklist URLs; run it from the manual CI
+workflow when needed. On Linux x86_64, the exact target package/flash-fit gate
+is:
 
 ```sh
 python3 tools/check-imagebuilder.py

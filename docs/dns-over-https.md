@@ -23,8 +23,10 @@ then makes these coordinated configuration changes:
   DoT reject rules.
 
 Time sync is handled by the [Encrypted NTP (NTS)](nts.md) module, not this
-one. NTS is primary; plain NTP-by-IP bootstrap in chrony still covers cold boot
-before DNS is available.
+one. Preferred NTS sources are primary. Chrony's explicit
+`authselectmode ignore` policy lets non-preferred, plain NTP-by-IP sources cover
+cold boot before DNS is available and remain a fallback when NTS is
+unavailable; that fallback time is unauthenticated.
 
 Candidate validation requires exactly the four named proxy instances, their
 expected URLs, unique ports, bootstrap values, and matching dnsmasq forwards.

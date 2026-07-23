@@ -485,10 +485,51 @@ wed_count=$(grep -c 'wed_enable=' /etc/modules.conf || :)
 [ "$(uci -q get chrony.cloudflare.nts)" = 1 ] || fail 'Cloudflare NTS server is missing'
 [ "$(uci -q get chrony.netnod.nts)" = 1 ] || fail 'Netnod NTS server is missing'
 [ "$(uci -q get chrony.time_nl.nts)" = 1 ] || fail 'time.nl NTS server is missing'
+[ "$(uci -q get chrony.cloudflare.prefer)" = 1 ] || fail 'Cloudflare NTS server is not preferred'
+[ "$(uci -q get chrony.netnod.prefer)" = 1 ] || fail 'Netnod NTS server is not preferred'
+[ "$(uci -q get chrony.time_nl.prefer)" = 1 ] || fail 'time.nl NTS server is not preferred'
 [ "$(uci -q get chrony.bootstrap_1.nts)" = 0 ] || fail 'NTP bootstrap source is missing'
+[ -z "$(uci -q get chrony.bootstrap_1.prefer || :)" ] || fail 'NTP bootstrap source is preferred'
 [ "$(uci -q get chrony.dhcp_ntp_server.disabled)" = 1 ] || fail 'DHCP NTP sources are still enabled'
 /etc/init.d/sysntpd enabled >/dev/null 2>&1 && fail 'sysntpd is still enabled'
 /etc/init.d/chronyd enabled >/dev/null 2>&1 || fail 'chronyd is not enabled'
+auth_policy_count=$(
+    awk '
+        previous == "authselectmode ignore" &&
+            $0 == "confdir /var/etc/chrony.d" { count++ }
+        { previous = $0 }
+        END { print count + 0 }
+    ' /etc/chrony/chrony.conf
+)
+[ "$auth_policy_count" = 1 ] ||
+    fail 'Chrony authselectmode policy is missing or incorrectly ordered'
+for nts_host in time.cloudflare.com nts.netnod.se ntppool1.time.nl; do
+    grep -Eq "^server ${nts_host}([[:space:]].*)?[[:space:]]nts[[:space:]]prefer([[:space:]]|$)" \
+        /var/etc/chrony.d/10-uci.conf ||
+        fail "generated Chrony config lacks nts prefer for $nts_host"
+done
+for bootstrap_ip in 194.177.4.1 213.222.217.11 80.50.102.114 193.219.28.60; do
+    bootstrap_line=$(grep -E "^server ${bootstrap_ip}([[:space:]]|$)" /var/etc/chrony.d/10-uci.conf || :)
+    [ -n "$bootstrap_line" ] || fail "generated Chrony config lacks bootstrap $bootstrap_ip"
+    case $bootstrap_line in
+        *" nts"* | *" prefer"*) fail "bootstrap $bootstrap_ip has nts or prefer in generated config" ;;
+    esac
+done
+chrony_selectdata=$(chronyc -n selectdata -a 2>/dev/null) ||
+    fail 'chronyc selectdata failed'
+preferred_source_count=$(
+    printf '%s\n' "$chrony_selectdata" |
+        awk 'NR > 2 && $4 ~ /P/ && $5 !~ /[RT]/ { count++ } END { print count + 0 }'
+)
+[ "$preferred_source_count" -ge 3 ] ||
+    fail 'NTS sources lack effective preference without implicit require/trust'
+for bootstrap_ip in 194.177.4.1 213.222.217.11 80.50.102.114 193.219.28.60; do
+    printf '%s\n' "$chrony_selectdata" |
+        awk -v ip="$bootstrap_ip" '
+            $2 == ip && $4 !~ /P/ && $5 !~ /[RT]/ { found = 1 }
+            END { exit(found ? 0 : 1) }
+        ' || fail "bootstrap $bootstrap_ip is preferred or waiting on authenticated selection"
+done
 for port in lan1 lan2 lan3 lan4 lan5; do
     uci -q get network.br_lan.ports | tr ' ' '\n' | grep -qx "$port" || fail "$port is absent from bridge"
 done
@@ -514,6 +555,76 @@ fi
 # same egress path again because netifd/fw4 reloads can briefly EPERM outbound
 # sockets the way apk's wget does.
 if [ "$profile" = live ]; then
+    /etc/init.d/chronyd stop || fail 'failed to stop chronyd for cold-boot test'
+    /etc/init.d/https-dns-proxy stop || :
+    /etc/init.d/dnsmasq stop || fail 'failed to stop dnsmasq for cold-boot test'
+    rm -f /var/run/chrony/* /var/run/chrony-dhcp/*
+    date -s '2020-01-01 00:00:00' >/dev/null ||
+        fail 'failed to set disposable VM clock for cold-boot test'
+    cold_boot_epoch=$(date +%s)
+    /etc/init.d/chronyd start || fail 'failed to start chronyd for cold-boot test'
+    cold_boot_synced=0
+    cold_boot_attempt=0
+    while [ "$cold_boot_attempt" -lt 90 ]; do
+        cold_boot_attempt=$((cold_boot_attempt + 1))
+        cold_boot_source=$(
+            chronyc -n sources 2>/dev/null |
+                awk '
+                    $1 == "^*" &&
+                        ($2 == "194.177.4.1" ||
+                         $2 == "213.222.217.11" ||
+                         $2 == "80.50.102.114" ||
+                         $2 == "193.219.28.60") {
+                        print $2
+                        exit
+                    }
+                '
+        )
+        if [ -n "$cold_boot_source" ] &&
+            [ "$(date +%s)" -gt "$((cold_boot_epoch + 86400))" ]; then
+            cold_boot_synced=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$cold_boot_synced" != 1 ]; then
+        {
+            printf 'cold-boot source: %s\n' "${cold_boot_source:-none}"
+            printf 'cold-boot start epoch: %s\n' "$cold_boot_epoch"
+            printf 'current epoch: %s\n' "$(date +%s)"
+            printf '%s\n' '--- chronyc tracking ---'
+            chronyc -n tracking 2>&1 || :
+            printf '%s\n' '--- chronyc sources ---'
+            chronyc -n sources -v 2>&1 || :
+            printf '%s\n' '--- chronyc selectdata ---'
+            chronyc -n selectdata -a 2>&1 || :
+        } >/tmp/vm-test-failure-detail
+        fail 'plain numeric NTP did not step the bad clock while DNS was unavailable'
+    fi
+    /etc/init.d/https-dns-proxy start ||
+        fail 'failed to restore https-dns-proxy after cold-boot test'
+    /etc/init.d/dnsmasq start || fail 'failed to restore dnsmasq after cold-boot test'
+    chronyc refresh >/dev/null 2>&1 || fail 'failed to refresh Chrony source resolution'
+    nts_authenticated=0
+    nts_attempt=0
+    while [ "$nts_attempt" -lt 60 ]; do
+        nts_attempt=$((nts_attempt + 1))
+        if chronyc -N authdata -a >/tmp/vm-test-chrony-authdata 2>&1 &&
+            grep -Eq '[[:space:]]NTS[[:space:]]' /tmp/vm-test-chrony-authdata; then
+            nts_authenticated=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$nts_authenticated" != 1 ]; then
+        {
+            printf '%s\n' '--- chronyc authdata ---'
+            cat /tmp/vm-test-chrony-authdata 2>&1 || :
+            printf '%s\n' '--- chronyc sources ---'
+            chronyc -n sources -v 2>&1 || :
+        } >/tmp/vm-test-failure-detail
+        fail 'NTS did not authenticate after DNS and DoH recovery'
+    fi
     check_doh_listeners 'before live DoH'
     live_egress_ready=0
     live_egress_attempt=0
@@ -960,6 +1071,7 @@ prepare_output=$(./router-config.sh prepare --recovery-ready)
 timeout_tx=$(printf '%s\n' "$prepare_output" | tail -n 1)
 export_normalized_uci >/tmp/timeout-before.uci
 cp /etc/modules.conf /tmp/timeout-before.modules.conf
+cp /etc/chrony/chrony.conf /tmp/timeout-before.chrony.conf
 rm -f /tmp/timeout-apply.pid /tmp/timeout-apply.log
 # shellcheck disable=SC2016 # Expanded by the inner shell after setsid.
 setsid sh -c '
@@ -1011,6 +1123,8 @@ if ! cmp -s /tmp/timeout-before.uci /tmp/timeout-after.uci; then
 fi
 cmp -s /tmp/timeout-before.modules.conf /etc/modules.conf ||
     fail 'watchdog did not restore modules.conf'
+cmp -s /tmp/timeout-before.chrony.conf /etc/chrony/chrony.conf ||
+    fail 'watchdog did not restore chrony.conf'
 [ ! -e "/root/router-config-backups/$timeout_tx/pending" ] ||
     fail 'watchdog left the pending marker behind'
 [ ! -e "$timeout_pid_file" ] || fail 'watchdog left its PID marker behind'

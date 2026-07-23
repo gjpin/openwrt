@@ -35,17 +35,20 @@ candidate can disconnect the router and require local recovery.
 
 ## Transaction model
 
-UCI changes are built and applied as one candidate, together with a managed
-`/etc/modules.conf` for Wireless Ethernet Dispatch (WED):
+UCI changes are built and applied as one candidate, together with managed
+`/etc/modules.conf` for Wireless Ethernet Dispatch (WED) and
+`/etc/chrony/chrony.conf` for Chrony source selection:
 
 1. `prepare --recovery-ready` copies live UCI into
    `/root/router-config-backups/<id>/backup` and `candidate`, copies
-   `/etc/modules.conf` (or an empty stand-in) the same way, applies overlays
-   to the candidate only, injects secrets into the mode-0600 candidate,
-   validates, writes `manifest.sha256`, and installs runtime helpers.
+   `/etc/modules.conf` (or an empty stand-in) and the package-owned main Chrony
+   configuration the same way, applies overlays to the candidate only, injects
+   secrets into the mode-0600 candidate, validates, writes `manifest.sha256`,
+   and installs runtime helpers.
 2. `apply <id>` verifies the manifest, marks the transaction pending, installs
-   the candidate into `/etc/config` and `/etc/modules.conf`, runs `fw4 check`,
-   reloads services, starts a five-minute watchdog, and waits for confirmation.
+   the candidate into `/etc/config`, `/etc/modules.conf`, and
+   `/etc/chrony/chrony.conf`, runs `fw4 check`, reloads services, starts a
+   five-minute watchdog, and waits for confirmation.
 3. `confirm <id>` from a second local/recovery-capable session clears pending
    and keeps the change. Without confirmation, the watchdog restores the
    backup. A reboot with a pending file triggers early-boot recovery.
@@ -142,7 +145,12 @@ path over direct remote replacement of live config files.
 - Use `chrony-nts` (not plain `chrony`) for time sync. Disable BusyBox
   `sysntpd` so only one NTP client runs. Keep NTS servers primary and retain
   plain NTP-by-IP chrony sources for cold-boot bootstrap before DNS/DoH TLS.
-  Keep chrony client-only (no pool, no LAN `allow`, DHCP NTP disabled).
+  Set `authselectmode ignore` immediately before
+  `confdir /var/etc/chrony.d` in the main Chrony configuration so plain sources
+  can synchronize independently; mark every NTS source `prefer` and no
+  bootstrap source preferred. This deliberately permits unauthenticated time
+  whenever preferred NTS sources are unavailable. Keep chrony client-only (no
+  pool, no LAN `allow`, DHCP NTP disabled).
 
 ## Editing shell and modules
 
@@ -210,11 +218,13 @@ fw4 check
 uci get firewall.defaults.flow_offloading
 uci get firewall.defaults.flow_offloading_hw
 grep -x 'options mt7915e wed_enable=Y' /etc/modules.conf
+grep -B1 -x 'confdir /var/etc/chrony.d' /etc/chrony/chrony.conf
 uci show https-dns-proxy
 uci show chrony
 uci show uhttpd | grep listen_
 uci show dropbear
 chronyc tracking
+chronyc -n selectdata -a
 chronyc -N authdata
 /etc/init.d/sysntpd enabled >/dev/null 2>&1 && echo 'sysntpd still enabled'
 logread -e netifd -e firewall -e https-dns-proxy -e chronyd -e uhttpd -e dropbear

@@ -176,8 +176,13 @@ def router():
     overlays = tmp_path / "overlays"
     modules = tmp_path / "modules"
     modules_conf = tmp_path / "etc-modules.conf"
+    chrony_conf = tmp_path / "chrony.conf"
     config.mkdir(); bin_dir.mkdir(); overlays.mkdir(); modules.mkdir(); proc_net.mkdir(parents=True)
     modules_conf.write_text("# test modules.conf\n")
+    chrony_conf.write_text(
+        "driftfile /var/run/chrony/chrony.drift\n"
+        "confdir /var/etc/chrony.d\n"
+    )
     socket_lines = "".join(
         f"   {index}: 0100007F:{port:04X} 00000000:0000 0A\n"
         for index, port in enumerate((5053, 5054, 5055, 5056, 5999))
@@ -335,6 +340,7 @@ exit 0
         "ROUTER_CONFIG_UCI_DIR": str(overlays),
         "ROUTER_CONFIG_MODULE_DIR": str(modules),
         "ROUTER_CONFIG_MODULES_CONF": str(modules_conf),
+        "ROUTER_CONFIG_CHRONY_CONF": str(chrony_conf),
         "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
         "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
         "ROUTER_CONFIG_UHTTPD_INIT": str(services["uhttpd-init"]),
@@ -456,13 +462,16 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         }
     chrony = json.loads((transaction_dir / "candidate" / "chrony").read_text())
     assert chrony["cloudflare"] == {
-        ".type": "server", "hostname": "time.cloudflare.com", "iburst": "1", "nts": "1",
+        ".type": "server", "hostname": "time.cloudflare.com", "iburst": "1",
+        "nts": "1", "prefer": "1",
     }
     assert chrony["netnod"] == {
-        ".type": "server", "hostname": "nts.netnod.se", "iburst": "1", "nts": "1",
+        ".type": "server", "hostname": "nts.netnod.se", "iburst": "1",
+        "nts": "1", "prefer": "1",
     }
     assert chrony["time_nl"] == {
-        ".type": "server", "hostname": "ntppool1.time.nl", "iburst": "1", "nts": "1",
+        ".type": "server", "hostname": "ntppool1.time.nl", "iburst": "1",
+        "nts": "1", "prefer": "1",
     }
     assert chrony["bootstrap_1"] == {
         ".type": "server", "hostname": "194.177.4.1", "iburst": "1", "nts": "0",
@@ -472,6 +481,9 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "allow" not in chrony
     assert chrony["nts"]["rtccheck"] == "1"
     assert chrony["nts"]["systemcerts"] == "1"
+    chrony_conf = (transaction_dir / "candidate" / "chrony.conf").read_text()
+    assert chrony_conf.count("authselectmode ignore") == 1
+    assert "authselectmode ignore\nconfdir /var/etc/chrony.d\n" in chrony_conf
     uhttpd = json.loads((transaction_dir / "candidate" / "uhttpd").read_text())
     assert uhttpd["main"]["listen_http"] == ["192.168.8.1:80"]
     assert uhttpd["main"]["listen_https"] == ["192.168.8.1:443"]
@@ -506,7 +518,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "candidate/uhttpd" in manifest
     assert "backup/dropbear" in manifest
     assert "candidate/dropbear" in manifest
+    assert "backup/chrony.conf" in manifest
+    assert "candidate/chrony.conf" in manifest
     assert (transaction_dir / "candidate" / "wireless").stat().st_mode & 0o777 == 0o600
+    assert (transaction_dir / "candidate" / "chrony.conf").stat().st_mode & 0o777 == 0o600
     rendered = (transaction_dir / "overlay" / "wireguard").read_text()
     assert env["VPN_KEY"] not in rendered
     assert env["VPN_PSK"] not in rendered
@@ -552,6 +567,49 @@ def test_repeated_prepare_is_idempotent(router):
         data = json.loads((backups / second / "candidate" / name).read_text())
         assert len(data) == len(set(data))
     assert json.loads((backups / second / "candidate" / "network").read_text())["br_lan"]["stp"] == "1"
+    first_chrony_conf = (backups / first / "candidate" / "chrony.conf").read_text()
+    Path(env["ROUTER_CONFIG_CHRONY_CONF"]).write_text(first_chrony_conf)
+    _, third = prepare(env)
+    third_chrony_conf = (backups / third / "candidate" / "chrony.conf").read_text()
+    assert third_chrony_conf == first_chrony_conf
+    assert third_chrony_conf.count("authselectmode ignore") == 1
+
+
+@pytest.mark.parametrize(("contents", "error"), [
+    (None, "missing or empty Chrony configuration"),
+    ("", "missing or empty Chrony configuration"),
+    ("driftfile /tmp/drift\n", "exactly one confdir"),
+    (
+        "confdir /var/etc/chrony.d\nconfdir /var/etc/chrony.d\n",
+        "exactly one confdir",
+    ),
+    (
+        "confdir /var/etc/chrony.d\nconfdir /var/etc/other.d\n",
+        "exactly one confdir",
+    ),
+    (
+        "authselectmode mix\nconfdir /var/etc/chrony.d\n",
+        "conflicting authselectmode",
+    ),
+    (
+        "authselectmode ignore\nauthselectmode ignore\n"
+        "confdir /var/etc/chrony.d\n",
+        "at most one authselectmode",
+    ),
+])
+def test_chrony_conf_preflight_rejects_unsafe_base_before_backup(router, contents, error):
+    _, config, backups, _, env = router
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_network = (config / "network").read_text()
+    if contents is None:
+        chrony_conf.unlink()
+    else:
+        chrony_conf.write_text(contents)
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert error in result.stderr
+    assert (config / "network").read_text() == original_network
+    assert not backups.exists()
 
 
 def test_preflight_rejects_missing_hardware_without_backup(router):
@@ -770,6 +828,8 @@ def test_apply_confirm_and_manual_rollback(router):
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_chrony_conf = chrony_conf.read_text()
     _, transaction = prepare(env)
     process = subprocess.Popen(
         [str(REPO / "router-config.sh"), "apply", transaction], env=env,
@@ -803,11 +863,15 @@ def test_apply_confirm_and_manual_rollback(router):
     assert json.loads((config / "firewall").read_text())["defaults"]["flow_offloading"] == "1"
     assert json.loads((config / "firewall").read_text())["defaults"]["flow_offloading_hw"] == "1"
     assert modules_conf.read_text().count("options mt7915e wed_enable=Y") == 1
+    assert chrony_conf.stat().st_mode & 0o777 == 0o644
+    assert "authselectmode ignore\nconfdir /var/etc/chrony.d\n" in chrony_conf.read_text()
     proxy = json.loads((config / "https-dns-proxy").read_text())
     assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
     run_router(env, "rollback", transaction)
     assert {name: (config / name).read_text() for name in originals} == originals
     assert modules_conf.read_text() == original_modules
+    assert chrony_conf.read_text() == original_chrony_conf
+    assert chrony_conf.stat().st_mode & 0o777 == 0o644
 
 
 def test_timeout_and_reboot_recovery_restore_backup(router):
@@ -815,12 +879,15 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     original = (config / "network").read_text()
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_chrony_conf = chrony_conf.read_text()
     env["ROUTER_CONFIG_TIMEOUT"] = "0.15"
     _, transaction = prepare(env)
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert (config / "network").read_text() == original
     assert modules_conf.read_text() == original_modules
+    assert chrony_conf.read_text() == original_chrony_conf
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
     assert not (backups / transaction / "pending").exists()
     assert not (backups / transaction / "watchdog.pid").exists()
@@ -828,12 +895,14 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     _, transaction = prepare(env)
     shutil.copy(backups / transaction / "candidate" / "network", config / "network")
     shutil.copy(backups / transaction / "candidate" / "modules.conf", modules_conf)
+    shutil.copy(backups / transaction / "candidate" / "chrony.conf", chrony_conf)
     (backups / transaction / "pending").touch()
     (backups / transaction / "state").write_text("pending\n")
     (backups / transaction / "watchdog.pid").write_text("999999\n")
     run_router(env, "_recover-pending")
     assert (config / "network").read_text() == original
     assert modules_conf.read_text() == original_modules
+    assert chrony_conf.read_text() == original_chrony_conf
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
     assert not (backups / transaction / "pending").exists()
     assert not (backups / transaction / "watchdog.pid").exists()
@@ -848,6 +917,8 @@ def test_watchdog_survives_apply_session_hangup_and_restores_every_file(router):
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_chrony_conf = chrony_conf.read_text()
     env["ROUTER_CONFIG_TIMEOUT"] = "2"
     _, transaction = prepare(env)
     process = subprocess.Popen(
@@ -882,6 +953,7 @@ def test_watchdog_survives_apply_session_hangup_and_restores_every_file(router):
     assert (transaction_dir / "state").read_text().strip() == "rolledback"
     assert {name: (config / name).read_text() for name in names} == originals
     assert modules_conf.read_text() == original_modules
+    assert chrony_conf.read_text() == original_chrony_conf
     assert not (transaction_dir / "pending").exists()
     assert not pid_file.exists()
 
@@ -895,6 +967,8 @@ def test_watchdog_start_failure_restores_every_file(router):
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_chrony_conf = chrony_conf.read_text()
     env["SETSID_FAIL"] = "1"
     env["ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS"] = "3"
     env["ROUTER_CONFIG_WATCHDOG_READY_INTERVAL"] = "0.01"
@@ -905,6 +979,7 @@ def test_watchdog_start_failure_restores_every_file(router):
     assert "could not start rollback watchdog; backups restored" in result.stderr
     assert {name: (config / name).read_text() for name in names} == originals
     assert modules_conf.read_text() == original_modules
+    assert chrony_conf.read_text() == original_chrony_conf
     assert (transaction_dir / "state").read_text().strip() == "rolledback"
     assert not (transaction_dir / "pending").exists()
     assert not (transaction_dir / "watchdog.pid").exists()
@@ -1016,6 +1091,8 @@ def test_each_coordinated_service_failure_is_named_and_restores_every_file(
     root, config, backups, _, env = router
     names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_chrony_conf = chrony_conf.read_text()
     _, transaction = prepare(env)
     fail = root / f"{service_name}-fail"
     fail.touch()
@@ -1036,19 +1113,23 @@ def test_each_coordinated_service_failure_is_named_and_restores_every_file(
     assert result.returncode != 0
     assert f"service reload failed at {failure_label}; backups restored" in result.stderr
     assert {name: (config / name).read_text() for name in names} == originals
+    assert chrony_conf.read_text() == original_chrony_conf
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
 def test_transaction_tampering_is_rejected(router):
     _, config, backups, _, env = router
     original = (config / "network").read_text()
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_chrony_conf = chrony_conf.read_text()
     _, transaction = prepare(env)
-    with (backups / transaction / "candidate" / "network").open("a") as stream:
+    with (backups / transaction / "candidate" / "chrony.conf").open("a") as stream:
         stream.write("tampered")
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert "checksum verification failed" in result.stderr
     assert (config / "network").read_text() == original
+    assert chrony_conf.read_text() == original_chrony_conf
 
 
 def test_partial_candidate_installation_failure_restores_all_packages(router):
@@ -1057,6 +1138,8 @@ def test_partial_candidate_installation_failure_restores_all_packages(router):
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
+    chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
+    original_chrony_conf = chrony_conf.read_text()
     _, transaction = prepare(env)
     fail = root / "install-fail"
     fail.touch()
@@ -1064,7 +1147,7 @@ def test_partial_candidate_installation_failure_restores_all_packages(router):
     write_executable(root / "bin" / "cp", f'''#!/bin/sh
 if [ -e "{fail}" ]; then
     case "$1" in
-        */candidate/firewall) rm -f "{fail}"; exit 1 ;;
+        */candidate/chrony.conf) rm -f "{fail}"; exit 1 ;;
     esac
 fi
 exec {real_cp} "$@"
@@ -1074,6 +1157,7 @@ exec {real_cp} "$@"
     assert "candidate installation failed" in result.stderr
     assert {name: (config / name).read_text() for name in names} == originals
     assert modules_conf.read_text() == original_modules
+    assert chrony_conf.read_text() == original_chrony_conf
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 

@@ -22,6 +22,7 @@ DNSMASQ_INIT=${ROUTER_CONFIG_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
 ADBLOCK_INIT=${ROUTER_CONFIG_ADBLOCK_INIT:-/etc/init.d/adblock-fast}
 PROC_NET_DIR=${ROUTER_CONFIG_PROC_NET_DIR:-/proc/net}
 MODULES_CONF=${ROUTER_CONFIG_MODULES_CONF:-/etc/modules.conf}
+CHRONY_CONF=${ROUTER_CONFIG_CHRONY_CONF:-/etc/chrony/chrony.conf}
 TIMEOUT=${ROUTER_CONFIG_TIMEOUT:-300}
 POLL_INTERVAL=${ROUTER_CONFIG_POLL_INTERVAL:-1}
 WATCHDOG_READY_ATTEMPTS=${ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS:-10}
@@ -205,6 +206,7 @@ preflight() {
         [ -s "$CONFIG_DIR/$config_name" ] || die "missing or empty $CONFIG_DIR/$config_name"
         uci -q -c "$CONFIG_DIR" show "$config_name" >/dev/null || die "malformed UCI package: $config_name"
     done
+    nts_preflight
 }
 
 check_base() {
@@ -262,6 +264,7 @@ write_manifest() {
         manifest_files="$manifest_files backup/$package_name candidate/$package_name"
     done
     manifest_files="$manifest_files backup/modules.conf candidate/modules.conf"
+    manifest_files="$manifest_files backup/chrony.conf candidate/chrony.conf"
     # Intentional splitting of the internally constructed relative path list.
     # shellcheck disable=SC2086
     (cd "$transaction_dir" && sha256sum $manifest_files) >"$transaction_dir/manifest.sha256"
@@ -318,6 +321,8 @@ prepare() {
         : >"$transaction_dir/backup/modules.conf"
         : >"$transaction_dir/candidate/modules.conf"
     fi
+    cp "$CHRONY_CONF" "$transaction_dir/backup/chrony.conf"
+    cp "$CHRONY_CONF" "$transaction_dir/candidate/chrony.conf"
     for overlay_name in network firewall wireless admin-access nts dns-over-https adblock-fast; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
@@ -332,7 +337,7 @@ prepare() {
     dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
     adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
     wireguard_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireguard"
-    chmod 600 "$transaction_dir/candidate/modules.conf"
+    chmod 600 "$transaction_dir/candidate/modules.conf" "$transaction_dir/candidate/chrony.conf"
     validate_candidate "$transaction_dir/candidate"
     write_manifest "$transaction_dir"
     printf '%s\n' prepared >"$transaction_dir/state"
@@ -364,10 +369,21 @@ install_modules_conf() {
     mv -f "$install_temp" "$MODULES_CONF" || return 1
 }
 
+install_chrony_conf() {
+    source_dir=$1
+    chrony_parent=${CHRONY_CONF%/*}
+    [ "$chrony_parent" = "$CHRONY_CONF" ] || mkdir -p "$chrony_parent" || return 1
+    install_temp=$CHRONY_CONF.router-config.$$
+    cp "$source_dir/chrony.conf" "$install_temp" || return 1
+    chmod 644 "$install_temp" || return 1
+    mv -f "$install_temp" "$CHRONY_CONF" || return 1
+}
+
 install_candidate() {
     candidate_dir=$1
     install_uci_files "$candidate_dir" || return 1
     install_modules_conf "$candidate_dir" || return 1
+    install_chrony_conf "$candidate_dir" || return 1
 }
 
 https_dns_proxy_listen_ports() {
@@ -474,6 +490,7 @@ restore_transaction() {
     transaction_dir=$1
     install_uci_files "$transaction_dir/backup" || die 'CRITICAL: UCI backup restoration failed'
     install_modules_conf "$transaction_dir/backup" || die 'CRITICAL: modules.conf backup restoration failed'
+    install_chrony_conf "$transaction_dir/backup" || die 'CRITICAL: chrony.conf backup restoration failed'
     if [ "${2-}" != boot ]; then
         reload_services || die 'CRITICAL: backups restored but a service reload failed'
     fi
