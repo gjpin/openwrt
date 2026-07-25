@@ -434,6 +434,21 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         "src_port": "67", "dest_port": "68", "proto": "udp",
         "family": "ipv4", "target": "ACCEPT",
     }
+    for network, label in (
+        ("pixelguest", "PixelGuest"),
+        ("pixelthings", "PixelThings"),
+        ("pixeliot", "PixelIoT"),
+    ):
+        assert firewall[f"reject_isp_transit_{network}"] == {
+            ".type": "rule",
+            "name": f"Reject-ISP-Transit-{label}",
+            "src": network,
+            "dest": "wan",
+            "dest_ip": "192.168.2.0/24",
+            "family": "ipv4",
+            "proto": "all",
+            "target": "REJECT",
+        }
     modules_conf = (transaction_dir / "candidate" / "modules.conf").read_text()
     assert modules_conf.count("options mt7915e wed_enable=Y") == 1
     assert "wed_enable=N" not in modules_conf
@@ -538,6 +553,9 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
 def test_repeated_prepare_is_idempotent(router):
     _, config, backups, _, env = router
     _, first = prepare(env)
+    first_firewall = json.loads(
+        (backups / first / "candidate" / "firewall").read_text()
+    )
     for name in (
         "network",
         "firewall",
@@ -566,6 +584,12 @@ def test_repeated_prepare_is_idempotent(router):
     ):
         data = json.loads((backups / second / "candidate" / name).read_text())
         assert len(data) == len(set(data))
+    second_firewall = json.loads(
+        (backups / second / "candidate" / "firewall").read_text()
+    )
+    for network in ("pixelguest", "pixelthings", "pixeliot"):
+        section = f"reject_isp_transit_{network}"
+        assert second_firewall[section] == first_firewall[section]
     assert json.loads((backups / second / "candidate" / "network").read_text())["br_lan"]["stp"] == "1"
     first_chrony_conf = (backups / first / "candidate" / "chrony.conf").read_text()
     Path(env["ROUTER_CONFIG_CHRONY_CONF"]).write_text(first_chrony_conf)
@@ -1271,6 +1295,41 @@ def test_https_dns_proxy_validation_and_forward_mismatch_are_preapply_failures(r
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert "dnsmasq upstreams do not match" in result.stderr
     assert (config / "network").read_text() == original
+
+
+@pytest.mark.parametrize(("mutation", "error"), [
+    (
+        "remove_pixelguest",
+        "missing ISP transit rejection for pixelguest",
+    ),
+    (
+        "set firewall.reject_isp_transit_pixelthings.proto='tcp'",
+        "ISP transit rejection has an unexpected protocol for pixelthings",
+    ),
+    (
+        "set firewall.reject_isp_transit_pixeliot.target='ACCEPT'",
+        "ISP transit rejection has an unexpected target for pixeliot",
+    ),
+])
+def test_isp_transit_rejection_validation_is_a_preapply_failure(
+    router, mutation, error
+):
+    _, config, backups, overlays, env = router
+    original = (config / "firewall").read_text()
+    firewall_overlay = overlays / "firewall"
+    if mutation == "remove_pixelguest":
+        overlay = firewall_overlay.read_text()
+        start = overlay.index("delete firewall.reject_isp_transit_pixelguest\n")
+        end = overlay.index("delete firewall.reject_isp_transit_pixelthings\n")
+        firewall_overlay.write_text(overlay[:start] + overlay[end:])
+    else:
+        with firewall_overlay.open("a") as stream:
+            stream.write(f"\n{mutation}\n")
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert error in result.stderr
+    assert (config / "firewall").read_text() == original
+    assert not any(backups.glob("*/state"))
 
 
 def test_admin_access_validation_rejects_wildcard_uhttpd_listen(router):

@@ -181,6 +181,23 @@ firewall_module_validate() {
         [ "$(uci_get "$candidate_dir" "firewall.reject_doq_$section_name.src")" = "$section_name" ] ||
             die "missing DoQ rejection for $section_name"
     done
+    for section_name in pixelguest pixelthings pixeliot; do
+        transit_rule="reject_isp_transit_$section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.$transit_rule")" = rule ] ||
+            die "missing ISP transit rejection for $section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.$transit_rule.src")" = "$section_name" ] ||
+            die "ISP transit rejection has an unexpected source for $section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.$transit_rule.dest")" = wan ] ||
+            die "ISP transit rejection has an unexpected destination zone for $section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.$transit_rule.dest_ip")" = 192.168.2.0/24 ] ||
+            die "ISP transit rejection has an unexpected destination subnet for $section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.$transit_rule.family")" = ipv4 ] ||
+            die "ISP transit rejection has an unexpected family for $section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.$transit_rule.proto")" = all ] ||
+            die "ISP transit rejection has an unexpected protocol for $section_name"
+        [ "$(uci_get "$candidate_dir" "firewall.$transit_rule.target")" = REJECT ] ||
+            die "ISP transit rejection has an unexpected target for $section_name"
+    done
     [ "$(uci_get "$candidate_dir" firewall.pixeliot_dhcp_reply.dest)" = pixeliot ] ||
         die 'missing outbound IoT DHCP exception'
     [ "$(uci_get "$candidate_dir" firewall.pixeliot_dhcp_reply.src_port)" = 67 ] ||

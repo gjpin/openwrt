@@ -525,6 +525,16 @@ for net in pixel pixelguest pixeliot pixelthings; do
     uci -q get "firewall.reject_dot_$net.src" | grep -qx "$net" || fail "missing DoT rejection for $net"
     uci -q get "firewall.reject_doq_$net.src" | grep -qx "$net" || fail "missing DoQ rejection for $net"
 done
+for net in pixelguest pixelthings pixeliot; do
+    rule="firewall.reject_isp_transit_$net"
+    [ "$(uci -q get "$rule")" = rule ] || fail "missing ISP transit rejection for $net"
+    [ "$(uci -q get "$rule.src")" = "$net" ] || fail "invalid ISP transit rejection source for $net"
+    [ "$(uci -q get "$rule.dest")" = wan ] || fail "invalid ISP transit rejection zone for $net"
+    [ "$(uci -q get "$rule.dest_ip")" = 192.168.2.0/24 ] || fail "invalid ISP transit rejection subnet for $net"
+    [ "$(uci -q get "$rule.family")" = ipv4 ] || fail "invalid ISP transit rejection family for $net"
+    [ "$(uci -q get "$rule.proto")" = all ] || fail "invalid ISP transit rejection protocol for $net"
+    [ "$(uci -q get "$rule.target")" = REJECT ] || fail "invalid ISP transit rejection target for $net"
+done
 uci -q get firewall.pixeliot_dhcp_reply.dest | grep -qx pixeliot || fail 'missing outbound IoT DHCP exception'
 uci -q get firewall.pixeliot_dhcp_reply.src_port | grep -qx 67 || fail 'invalid IoT DHCP reply source port'
 uci -q get firewall.pixeliot_dhcp_reply.dest_port | grep -qx 68 || fail 'invalid IoT DHCP reply destination port'
@@ -872,6 +882,48 @@ if [ "$dns_ready" != 1 ]; then
     } >/tmp/vm-test-failure-detail
     fail 'dnsmasq did not serve the interception test answer'
 fi
+
+isp_transit_counter() {
+    nft list chain inet fw4 "forward_$1" 2>/dev/null |
+        sed -n "/Reject-ISP-Transit-$2/s/.*counter packets \\([0-9][0-9]*\\).*/\\1/p" |
+        head -n 1
+}
+
+ip netns exec pixel1 ping -c 1 -W 2 192.168.2.1 >/dev/null ||
+    fail 'Pixel cannot reach the ISP transit gateway'
+for client in guest things iot; do
+    case $client in
+        guest)
+            transit_zone=pixelguest
+            transit_label=PixelGuest
+            ;;
+        things)
+            transit_zone=pixelthings
+            transit_label=PixelThings
+            ;;
+        iot)
+            transit_zone=pixeliot
+            transit_label=PixelIoT
+            ;;
+    esac
+    transit_before=$(isp_transit_counter "$transit_zone" "$transit_label")
+    [ -n "$transit_before" ] || fail "$transit_label ISP transit rejection has no nftables counter"
+    ! ip netns exec "$client" ping -c 1 -W 2 192.168.2.1 >/dev/null 2>&1 ||
+        fail "$transit_label reached the ISP transit gateway"
+    transit_after=$(isp_transit_counter "$transit_zone" "$transit_label")
+    if [ -z "$transit_after" ] || [ "$transit_after" -le "$transit_before" ]; then
+        {
+            printf '%s ISP transit reject packets before: %s\n' "$transit_label" "$transit_before"
+            printf '%s ISP transit reject packets after: %s\n' "$transit_label" "${transit_after:-missing}"
+            printf '%s\n' "--- $transit_label forward nftables chain ---"
+            nft list chain inet fw4 "forward_$transit_zone" || :
+            printf '%s\n' "--- $transit_label routes ---"
+            ip -n "$client" route || :
+        } >/tmp/vm-test-failure-detail 2>&1
+        fail "$transit_label ISP transit rejection counter did not increase"
+    fi
+done
+
 dns_before=$(nft list ruleset |
     sed -n '/PixelGuest-Divert-DNS/s/.*counter packets \([0-9][0-9]*\).*/\1/p' |
     head -n 1)

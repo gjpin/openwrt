@@ -12,6 +12,12 @@ This module creates one firewall zone per managed VLAN. Routing is allowlisted:
 | IoT | Block | Block | Block | — | Block |
 | Things | Allow | Block | Block | Block | — |
 
+Guest and Things retain Internet access through WAN, while IoT has no WAN
+forwarding. All IPv4 protocols from those three restricted zones to the ISP
+transit subnet (`192.168.2.0/24`) are also explicitly rejected. Pixel keeps
+unrestricted WAN forwarding so trusted clients can reach the Vodafone router
+at `192.168.2.1` for administration.
+
 Pixel accepts access to services on the router. Guest, IoT, and Things reject
 other router input but explicitly allow DNS and DHCP on TCP/UDP ports 53, 67,
 and 68. IoT also rejects general zone output, with a narrow UDP 67-to-68

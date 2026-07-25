@@ -310,6 +310,26 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
     assert "missing DoQ rejection for $net" in source
 
 
+def test_vm_guest_blocks_restricted_clients_from_isp_transit_before_wan_swap():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    client_setup = source.index("lease things things0")
+    pixel_probe = source.index(
+        "ip netns exec pixel1 ping -c 1 -W 2 192.168.2.1", client_setup
+    )
+    restricted_probe = source.index(
+        'ip netns exec "$client" ping -c 1 -W 2 192.168.2.1', pixel_probe
+    )
+    counter_check = source.index(
+        "ISP transit rejection counter did not increase", restricted_probe
+    )
+    wan_swap = source.index("ip link add vmwan type veth", counter_check)
+    assert client_setup < pixel_probe < restricted_probe < counter_check < wan_swap
+    assert "isp_transit_counter() {" in source
+    assert 'nft list chain inet fw4 "forward_$1"' in source
+    assert "Reject-ISP-Transit-$2" in source
+    assert "for client in guest things iot; do" in source
+
+
 def test_vm_guest_live_doh_waits_for_egress_and_retries_dig():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     live_start = source.index('if [ "$profile" = live ]; then')
