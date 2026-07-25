@@ -91,7 +91,11 @@ network_module_preflight() {
             die 'stock network.lan has a customized IPv6 assignment'
         [ "$(uci_get "$CONFIG_DIR" dhcp.lan)" = dhcp ] ||
             die 'stock dhcp.lan section is missing'
-        network_check_allowed_options "$CONFIG_DIR" dhcp lan 'interface start limit leasetime'
+        # odhcpd's first-boot defaults make the live overlay more explicit
+        # than /rom/etc/config by adding the stock DHCPv4 and IPv6 server
+        # settings.  Accept those options only with their generated values.
+        network_check_allowed_options "$CONFIG_DIR" dhcp lan \
+            'interface start limit leasetime dhcpv4 dhcpv6 ra ra_slaac ra_flags'
         [ "$(uci_get "$CONFIG_DIR" dhcp.lan.interface)" = lan ] ||
             die 'stock dhcp.lan targets an unexpected interface'
         [ "$(uci_get "$CONFIG_DIR" dhcp.lan.start)" = 100 ] ||
@@ -100,6 +104,22 @@ network_module_preflight() {
             die 'stock dhcp.lan has a customized pool size'
         [ "$(uci_get "$CONFIG_DIR" dhcp.lan.leasetime)" = 12h ] ||
             die 'stock dhcp.lan has a customized lease time'
+        network_lan_dhcpv4=$(uci_get "$CONFIG_DIR" dhcp.lan.dhcpv4 2>/dev/null || :)
+        [ -z "$network_lan_dhcpv4" ] || [ "$network_lan_dhcpv4" = server ] ||
+            die 'stock dhcp.lan has a customized DHCPv4 mode'
+        network_lan_dhcpv6=$(uci_get "$CONFIG_DIR" dhcp.lan.dhcpv6 2>/dev/null || :)
+        [ -z "$network_lan_dhcpv6" ] || [ "$network_lan_dhcpv6" = server ] ||
+            die 'stock dhcp.lan has a customized DHCPv6 mode'
+        network_lan_ra=$(uci_get "$CONFIG_DIR" dhcp.lan.ra 2>/dev/null || :)
+        [ -z "$network_lan_ra" ] || [ "$network_lan_ra" = server ] ||
+            die 'stock dhcp.lan has a customized RA mode'
+        network_lan_ra_slaac=$(uci_get "$CONFIG_DIR" dhcp.lan.ra_slaac 2>/dev/null || :)
+        [ -z "$network_lan_ra_slaac" ] || [ "$network_lan_ra_slaac" = 1 ] ||
+            die 'stock dhcp.lan has customized RA SLAAC'
+        network_lan_ra_flags=$(uci_get "$CONFIG_DIR" dhcp.lan.ra_flags 2>/dev/null || :)
+        [ -z "$network_lan_ra_flags" ] ||
+            [ "$network_lan_ra_flags" = 'managed-config other-config' ] ||
+            die 'stock dhcp.lan has customized RA flags'
     elif uci_get "$CONFIG_DIR" dhcp.lan >/dev/null 2>&1; then
         die 'dhcp.lan exists without network.lan'
     fi

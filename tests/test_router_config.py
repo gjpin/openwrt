@@ -659,7 +659,9 @@ def test_fresh_stock_base_is_normalized_in_candidate_only(router):
     dhcp = json.loads((config / "dhcp").read_text())
     dhcp["lan"] = {
         ".type": "dhcp", "interface": "lan", "start": "100",
-        "limit": "150", "leasetime": "12h",
+        "limit": "150", "leasetime": "12h", "dhcpv4": "server",
+        "dhcpv6": "server", "ra": "server", "ra_slaac": "1",
+        "ra_flags": ["managed-config", "other-config"],
     }
     (config / "dhcp").write_text(json.dumps(dhcp))
     firewall = {
@@ -726,6 +728,26 @@ def test_custom_stock_base_is_rejected_before_backup(router):
     result = run_router(env, "check-base", check=False)
     assert result.returncode != 0
     assert "customized network membership" in result.stderr
+    assert not backups.exists()
+
+
+def test_custom_stock_lan_ra_defaults_are_rejected_before_backup(router):
+    _, config, backups, _, env = router
+    network = json.loads((config / "network").read_text())
+    network["lan"] = {
+        ".type": "interface", "device": "br-lan", "proto": "static",
+        "ipaddr": "192.168.1.1", "netmask": "255.255.255.0",
+    }
+    (config / "network").write_text(json.dumps(network))
+    dhcp = json.loads((config / "dhcp").read_text())
+    dhcp["lan"] = {
+        ".type": "dhcp", "interface": "lan", "start": "100",
+        "limit": "150", "leasetime": "12h", "ra": "relay",
+    }
+    (config / "dhcp").write_text(json.dumps(dhcp))
+    result = run_router(env, "check-base", check=False)
+    assert result.returncode != 0
+    assert "customized RA mode" in result.stderr
     assert not backups.exists()
 
 

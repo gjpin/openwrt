@@ -37,6 +37,9 @@ The module preserves the router's base network sections and refuses to proceed
 unless loopback, globals, WAN, `br_lan`, and the five expected DSA ports exist.
 A recognized fresh stock `lan` interface (still expected at `192.168.1.1` before
 migration), DHCP pool, `wan6`, and ULA prefix are removed transaction-locally.
+The stock DHCP check accepts the explicit DHCPv4, DHCPv6, RA, SLAAC, and RA flag
+values written by the upstream `odhcpd` first-boot defaults, while rejecting
+non-stock modes or flags.
 The stock LAN preflight address is deliberately distinct from the
 `192.168.2.0/24` ISP transit; do not renumber the stock LAN instead. Customized
 stock LAN settings are rejected rather than guessed. The overlay updates an

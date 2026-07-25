@@ -241,6 +241,12 @@ set dhcp.lan.interface='lan'
 set dhcp.lan.start='100'
 set dhcp.lan.limit='150'
 set dhcp.lan.leasetime='12h'
+set dhcp.lan.dhcpv4='server'
+set dhcp.lan.dhcpv6='server'
+set dhcp.lan.ra='server'
+set dhcp.lan.ra_slaac='1'
+add_list dhcp.lan.ra_flags='managed-config'
+add_list dhcp.lan.ra_flags='other-config'
 EOF
 uci commit dhcp
 
