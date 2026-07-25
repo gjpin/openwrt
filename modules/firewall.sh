@@ -76,7 +76,7 @@ firewall_classify_base() {
         die 'stock firewall WAN input policy was customized'
     [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_WAN_SECTION.output")" = ACCEPT ] ||
         die 'stock firewall WAN output policy was customized'
-    [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_WAN_SECTION.forward")" = REJECT ] ||
+    [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_WAN_SECTION.forward")" = DROP ] ||
         die 'stock firewall WAN forward policy was customized'
     firewall_wan_network=$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_WAN_SECTION.network") ||
         die 'firewall WAN zone has no network membership'

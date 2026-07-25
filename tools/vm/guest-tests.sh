@@ -269,7 +269,7 @@ add_list firewall.@zone[-1].network='wan'
 add_list firewall.@zone[-1].network='wan6'
 set firewall.@zone[-1].input='REJECT'
 set firewall.@zone[-1].output='ACCEPT'
-set firewall.@zone[-1].forward='REJECT'
+set firewall.@zone[-1].forward='DROP'
 set firewall.@zone[-1].masq='1'
 set firewall.@zone[-1].mtu_fix='1'
 add firewall forwarding

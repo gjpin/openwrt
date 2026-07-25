@@ -205,7 +205,7 @@ def router():
     }
     firewall = {
         "defaults": {".type": "defaults", "input": "REJECT", "output": "ACCEPT", "forward": "REJECT"},
-        "wan": {".type": "zone", "name": "wan", "network": ["wan"], "input": "REJECT", "output": "ACCEPT", "forward": "REJECT"},
+        "wan": {".type": "zone", "name": "wan", "network": ["wan"], "input": "REJECT", "output": "ACCEPT", "forward": "DROP"},
         "unrelated": {".type": "rule", "name": "Keep me"},
     }
     wireless = {
@@ -675,7 +675,7 @@ def test_fresh_stock_base_is_normalized_in_candidate_only(router):
         },
         "@zone[1]": {
             ".type": "zone", "name": "wan", "network": ["wan", "wan6"],
-            "input": "REJECT", "output": "ACCEPT", "forward": "REJECT",
+            "input": "REJECT", "output": "ACCEPT", "forward": "DROP",
             "masq": "1", "mtu_fix": "1",
         },
         "@forwarding[0]": {".type": "forwarding", "src": "lan", "dest": "wan"},

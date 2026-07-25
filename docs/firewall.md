@@ -38,8 +38,9 @@ offloading and is not managed or enforced by this module.
 The module identifies a unique stock defaults section, LAN and WAN zones, and
 LAN-to-WAN forwarding by content. Anonymous sections are named only in the
 candidate; the obsolete LAN policy is removed and `wan6` is removed from WAN.
-Customized or ambiguous stock sections fail preflight. The complete candidate
-is validated with `fw4 check`; the overlay is not a complete replacement for
-`/etc/config/firewall`.
+The stock WAN zone is expected to use the `DROP` forward policy shipped by
+firewall4 in OpenWrt 25.12. Customized or ambiguous stock sections fail
+preflight. The complete candidate is validated with `fw4 check`; the overlay is
+not a complete replacement for `/etc/config/firewall`.
 
 [Back to the README](../README.md)
