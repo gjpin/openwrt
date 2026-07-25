@@ -150,9 +150,9 @@ network_module_validate() {
     ! uci_get "$candidate_dir" dhcp.lan >/dev/null 2>&1 || die 'obsolete LAN DHCP pool is still configured'
     ! uci_get "$candidate_dir" network.globals.ula_prefix >/dev/null 2>&1 || die 'IPv6 ULA prefix is still configured'
     [ "$(uci_get "$candidate_dir" network.wan.proto)" = static ] || die 'WAN must use a static address'
-    [ "$(uci_get "$candidate_dir" network.wan.ipaddr)" = 192.168.1.2 ] || die 'WAN address must be 192.168.1.2'
+    [ "$(uci_get "$candidate_dir" network.wan.ipaddr)" = 192.168.2.2 ] || die 'WAN address must be 192.168.2.2'
     [ "$(uci_get "$candidate_dir" network.wan.netmask)" = 255.255.255.0 ] || die 'WAN netmask must be 255.255.255.0'
-    [ "$(uci_get "$candidate_dir" network.wan.gateway)" = 192.168.1.1 ] || die 'WAN gateway must be 192.168.1.1'
+    [ "$(uci_get "$candidate_dir" network.wan.gateway)" = 192.168.2.1 ] || die 'WAN gateway must be 192.168.2.1'
     [ "$(uci_get "$candidate_dir" network.wan.ipv6)" = 0 ] || die 'IPv6 is not disabled on WAN'
     for section_name in pixel pixelthings pixelguest pixeliot; do
         [ "$(uci_get "$candidate_dir" "network.$section_name")" = interface ] || die "missing network.$section_name"

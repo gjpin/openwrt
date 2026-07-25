@@ -2,9 +2,9 @@
 # This is applied to an existing OpenWrt configuration, not installed directly.
 
 set network.wan.proto='static'
-set network.wan.ipaddr='192.168.1.2'
+set network.wan.ipaddr='192.168.2.2'
 set network.wan.netmask='255.255.255.0'
-set network.wan.gateway='192.168.1.1'
+set network.wan.gateway='192.168.2.1'
 set network.wan.ipv6='0'
 delete network.wan6
 delete network.globals.ula_prefix

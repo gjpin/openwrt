@@ -18,8 +18,8 @@ confirmed within five minutes.
   NTP-by-IP cold-boot and outage fallback
 - DNS-based ad and tracker blocking
 - An IPv4-only WireGuard server attached to the trusted Pixel zone
-- Static IPv4 WAN behind an ISP router (`192.168.1.2/24`, gateway
-  `192.168.1.1`), with managed VLANs on `192.168.8`–`11.0/24` (double NAT)
+- Static IPv4 WAN behind an ISP router (`192.168.2.2/24`, gateway
+  `192.168.2.1`), with managed VLANs on `192.168.8`–`11.0/24` (double NAT)
 - IPv4-only WAN and managed VLANs, with IPv6 delegation and advertisements disabled
 - Checksummed backups, candidate validation, and timed/early-boot rollback
 
@@ -44,10 +44,17 @@ must run on the target router as `root`; do not run it on a workstation.
 
 ## Run on the OpenWrt router
 
-1. Open two local or recovery-capable sessions to the router. Before apply,
+1. Before connecting the OpenWrt WAN port, configure the ISP router LAN as
+   `192.168.2.1/24`. Reserve `192.168.2.2` for the OpenWrt WAN MAC address or
+   exclude it from the ISP router's dynamic DHCP pool. Reconnect to the ISP
+   router at `192.168.2.1` and verify its internet service before continuing.
+   Do not proceed if the ISP router cannot use this subnet: the separate transit
+   avoids an address collision with fresh OpenWrt LAN `192.168.1.1/24`.
+
+   Open two local or recovery-capable sessions to OpenWrt. Before apply,
    `ROUTER_ADDRESS` is typically the stock LAN address (`192.168.1.1`). After
    apply, use the Pixel gateway (`192.168.8.1`) for management and confirmation.
-   Plug the WAN port into the ISP router and confirm stock WAN already has
+   Plug the OpenWrt WAN port into the ISP router and confirm stock WAN has
    working internet; `uclient-fetch` and `apk` need it before setup mutates
    anything. In the first session, create a backup:
 
@@ -104,9 +111,9 @@ must run on the target router as `root`; do not run it on a workstation.
    ```
 
    Keep `$client_private` for the peer device; only its public key is exported as
-   `VPN_PUB`. After apply, WAN is static `192.168.1.2/24` behind the ISP
+   `VPN_PUB`. After apply, WAN is static `192.168.2.2/24` behind the ISP
    router. For inbound WireGuard peers, add an ISP-router UDP port forward to
-   `192.168.1.2` for `VPN_PORT`.
+   `192.168.2.2` for `VPN_PORT`.
 
 4. After apply, stock LAN `192.168.1.1` is gone, so the first SSH session usually
    drops. That is expected: the pending watchdog still runs. Open (or keep) the

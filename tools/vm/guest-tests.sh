@@ -292,10 +292,9 @@ uci commit wireless
 # The generic armsr image starts netifd without a wireless backend. Installing
 # wifi-scripts adds that backend, but netifd discovers handlers only at startup.
 # Restart only after replacing the auto-loaded hwsim PHYs and seeding their
-# final mapping. The stock LAN and emulated ISP intentionally share
-# 192.168.1.0/24 so the applied static WAN uses its production address and
-# gateway. Keep the stock LAN in UCI and preserve its DSA-like bridge topology
-# for preflight, but remove its live address until candidate apply replaces it.
+# final mapping. The stock 192.168.1.0/24 LAN and emulated 192.168.2.0/24 ISP
+# transit are deliberately distinct so package installation has working WAN
+# connectivity before the candidate replaces the stock LAN.
 /etc/init.d/network restart || fail 'failed to restart netifd after installing wifi-scripts'
 stock_lan_ready=0
 stock_lan_attempt=0
@@ -307,19 +306,7 @@ while [ "$stock_lan_attempt" -lt 30 ]; do
     fi
     sleep 1
 done
-[ "$stock_lan_ready" = 1 ] || fail 'overlapping stock LAN did not start'
-ip -4 address flush dev br-lan || fail 'failed to unnumber overlapping stock LAN'
-stock_lan_unnumbered=0
-stock_lan_attempt=0
-while [ "$stock_lan_attempt" -lt 30 ]; do
-    stock_lan_attempt=$((stock_lan_attempt + 1))
-    if ! ip -4 address show dev br-lan | grep -q '192\.168\.1\.1/24'; then
-        stock_lan_unnumbered=1
-        break
-    fi
-    sleep 1
-done
-[ "$stock_lan_unnumbered" = 1 ] || fail 'overlapping stock LAN stayed numbered'
+[ "$stock_lan_ready" = 1 ] || fail 'stock LAN did not start'
 uplink_ready=0
 uplink_attempt=0
 while [ "$uplink_attempt" -lt 30 ]; do
@@ -330,7 +317,7 @@ while [ "$uplink_attempt" -lt 30 ]; do
     fi
     sleep 1
 done
-[ "$uplink_ready" = 1 ] || fail 'WAN did not recover after restarting netifd'
+[ "$uplink_ready" = 1 ] || fail 'WAN did not start on the non-overlapping ISP transit'
 # Apply the seeded firewall explicitly. netifd can mark WAN up before fw4 has
 # reloaded from the stock overlay, and apk's wget then fails with EPERM
 # ("Operation not permitted") against downloads.openwrt.org.
@@ -344,7 +331,7 @@ egress_attempt=0
 while [ "$egress_attempt" -lt 15 ]; do
     egress_attempt=$((egress_attempt + 1))
     printf 'vm-test: WAN egress probe attempt %s/15\n' "$egress_attempt" >&2
-    if ping -c 1 -W 2 192.168.1.1 >/tmp/vm-test-ping-probe 2>&1 &&
+    if ping -c 1 -W 2 192.168.2.1 >/tmp/vm-test-ping-probe 2>&1 &&
         uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
             >/tmp/vm-test-wget-probe 2>&1; then
         egress_ready=1
@@ -473,9 +460,9 @@ fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get network.lan || :)" = '' ] || fail 'stock LAN survived migration'
 [ "$(uci -q get network.wan6 || :)" = '' ] || fail 'wan6 survived migration'
 [ "$(uci -q get network.wan.proto)" = static ] || fail 'WAN was not pinned static'
-[ "$(uci -q get network.wan.ipaddr)" = 192.168.1.2 ] || fail 'WAN address was not set to 192.168.1.2'
+[ "$(uci -q get network.wan.ipaddr)" = 192.168.2.2 ] || fail 'WAN address was not set to 192.168.2.2'
 [ "$(uci -q get network.wan.netmask)" = 255.255.255.0 ] || fail 'WAN netmask was not set'
-[ "$(uci -q get network.wan.gateway)" = 192.168.1.1 ] || fail 'WAN gateway was not set to 192.168.1.1'
+[ "$(uci -q get network.wan.gateway)" = 192.168.2.1 ] || fail 'WAN gateway was not set to 192.168.2.1'
 [ "$(uci -q get firewall.wan.network)" = wan ] || fail 'WAN zone was not normalized'
 [ "$(uci -q get firewall.defaults.flow_offloading)" = 1 ] || fail 'software flow offloading is not enabled'
 [ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
@@ -631,7 +618,7 @@ if [ "$profile" = live ]; then
     while [ "$live_egress_attempt" -lt 15 ]; do
         live_egress_attempt=$((live_egress_attempt + 1))
         printf 'vm-test: live DoH egress probe attempt %s/15\n' "$live_egress_attempt" >&2
-        if ping -c 1 -W 2 192.168.1.1 >/tmp/vm-test-live-doh-ping 2>&1 &&
+        if ping -c 1 -W 2 192.168.2.1 >/tmp/vm-test-live-doh-ping 2>&1 &&
             uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
                 >/tmp/vm-test-live-doh-wget 2>&1; then
             live_egress_ready=1

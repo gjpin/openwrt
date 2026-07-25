@@ -27,10 +27,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 CACHE = REPO / ".cache" / "openwrt-vm"
 RELEASE = "25.12.4"
-QEMU_ISP_NETWORK = "192.168.1.0/24"
-QEMU_ISP_GATEWAY = "192.168.1.1"
-QEMU_WAN_ADDRESS = "192.168.1.2"
-QEMU_ISP_DNS = "192.168.1.3"
+QEMU_ISP_NETWORK = "192.168.2.0/24"
+QEMU_ISP_GATEWAY = "192.168.2.1"
+QEMU_WAN_ADDRESS = "192.168.2.2"
+QEMU_ISP_DNS = "192.168.2.3"
 BASE_URL = f"https://downloads.openwrt.org/releases/{RELEASE}/targets/armsr/armv8"
 ARTIFACTS = {
     "openwrt-25.12.4-armsr-armv8-generic-kernel.bin":

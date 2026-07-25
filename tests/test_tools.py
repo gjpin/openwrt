@@ -48,10 +48,10 @@ def test_vm_initramfs_does_not_mount_acceptance_disk_as_root():
     assert initramfs[initramfs.index("-append") + 1] == "console=ttyAMA0,115200n8"
     assert disk_root[disk_root.index("-append") + 1].startswith("root=/dev/vda rootwait ")
     netdev = disk_root[disk_root.index("-netdev") + 1]
-    assert "net=192.168.1.0/24" in netdev
-    assert "host=192.168.1.1" in netdev
-    assert "dhcpstart=192.168.1.2" in netdev
-    assert "dns=192.168.1.3" in netdev
+    assert "net=192.168.2.0/24" in netdev
+    assert "host=192.168.2.1" in netdev
+    assert "dhcpstart=192.168.2.2" in netdev
+    assert "dns=192.168.2.3" in netdev
 
 
 def test_vm_guest_avoids_builtin_and_virtual_package_names():
@@ -207,25 +207,19 @@ def test_vm_guest_checks_ap_readiness_across_apply_and_rollback_phases():
     assert "-printf" not in helper
 
 
-def test_vm_guest_waits_for_apk_after_wan_recovery():
+def test_vm_guest_waits_for_apk_on_non_overlapping_wan():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     network_restart = source.index(
         "/etc/init.d/network restart || fail "
         "'failed to restart netifd after installing wifi-scripts'"
     )
     lan_ready = source.index('ifstatus lan | grep -q \'"up": true\'', network_restart)
-    lan_flush = source.index(
-        "ip -4 address flush dev br-lan || fail "
-        "'failed to unnumber overlapping stock LAN'",
-        lan_ready,
-    )
-    lan_unnumbered = source.index("ip -4 address show dev br-lan", lan_flush)
-    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', lan_unnumbered)
+    wan_ready = source.index('ifstatus wan | grep -q \'"up": true\'', lan_ready)
     firewall_restart = source.index(
         "/etc/init.d/firewall restart || fail 'failed to apply seeded firewall'",
         wan_ready,
     )
-    ping_probe = source.index("ping -c 1 -W 2 192.168.1.1", firewall_restart)
+    ping_probe = source.index("ping -c 1 -W 2 192.168.2.1", firewall_restart)
     wget_probe = source.index(
         "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/", ping_probe
     )
@@ -235,8 +229,6 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
     assert (
         network_restart
         < lan_ready
-        < lan_flush
-        < lan_unnumbered
         < wan_ready
         < firewall_restart
         < ping_probe
@@ -246,6 +238,8 @@ def test_vm_guest_waits_for_apk_after_wan_recovery():
         < setup_start
     )
     assert "ifdown lan" not in source
+    assert "ip -4 address flush dev br-lan" not in source
+    assert "failed to unnumber overlapping stock LAN" not in source
     assert "fail 'apk update failed after WAN recovery'" in source
     assert "failed to install VM guest packages" in source
 
@@ -254,7 +248,7 @@ def test_vm_guest_keeps_production_wan_for_second_setup_and_live_doh():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     first_setup = source.index("run_and_confirm first")
     wan_static = source.index(
-        '[ "$(uci -q get network.wan.ipaddr)" = 192.168.1.2 ]', first_setup
+        '[ "$(uci -q get network.wan.ipaddr)" = 192.168.2.2 ]', first_setup
     )
     second_setup = source.index("run_and_confirm second", wan_static)
     live = source.index('if [ "$profile" = live ]; then', second_setup)
@@ -322,7 +316,7 @@ def test_vm_guest_live_doh_waits_for_egress_and_retries_dig():
     live = source[live_start : source.index("\nfi\n", live_start)]
     assert "check_doh_listeners 'before live DoH'" in live
     assert "live DoH egress probe attempt" in live
-    assert "ping -c 1 -W 2 192.168.1.1" in live
+    assert "ping -c 1 -W 2 192.168.2.1" in live
     assert "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/" in live
     assert "/etc/init.d/firewall reload" in live
     assert "fail 'live DoH egress was not ready'" in live

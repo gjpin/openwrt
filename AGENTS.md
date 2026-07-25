@@ -82,11 +82,11 @@ path over direct remote replacement of live config files.
 
 - Keep network names aligned across overlays and modules. Current VLAN
   interfaces are `pixel`, `pixelguest`, `pixeliot`, and `pixelthings`.
-- Pin addressing as one change: static WAN `192.168.1.2/24` with gateway
-  `192.168.1.1` (ISP router LAN), and managed VLANs `pixel` `192.168.8.1/24`,
+- Pin addressing as one change: static WAN `192.168.2.2/24` with gateway
+  `192.168.2.1` (ISP router LAN), and managed VLANs `pixel` `192.168.8.1/24`,
   `pixelguest` `192.168.9.1/24`, `pixeliot` `192.168.10.1/24`, and
   `pixelthings` `192.168.11.1/24`. This is double NAT behind the ISP router;
-  inbound WireGuard needs an ISP port forward to `192.168.1.2` for `VPN_PORT`.
+  inbound WireGuard needs an ISP port forward to `192.168.2.2` for `VPN_PORT`.
   Keep `VPN_ADDR` off the WAN and managed VLAN subnets.
 - Keep VLAN IDs, bridge-VLAN ports, subnets, wireless `network` values,
   firewall zones, forwarding, and DNS divert rules consistent as one change.
@@ -125,8 +125,8 @@ path over direct remote replacement of live config files.
   Stock-base preflight still expects fresh OpenWrt `network.lan` at
   `192.168.1.1` before migration; that is not the managed `pixel` subnet
   (`192.168.8.1`). Do not “fix” the stock LAN preflight to `192.168.8.1`.
-  Apply WAN and VLAN renumbering together; do not leave live WAN on
-  `192.168.1.2` while stock LAN remains `192.168.1.1`.
+  Keep the ISP transit on `192.168.2.0/24` so it does not overlap that stock
+  LAN during package installation. Apply WAN and VLAN renumbering together.
 - Target hardware expectations are device-specific: DSA ports `lan1` through
   `lan5`, `br-lan`, and exactly one `2g` plus one `5g` `wifi-device`. Do not
   generalize without target evidence. Preflight rejects customized or ambiguous
