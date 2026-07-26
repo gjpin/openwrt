@@ -56,6 +56,8 @@ adblock_fast_validate() {
         die 'adblock-fast candidate is not enabled'
     [ "$(uci_get "$candidate_dir" adblock-fast.config.dns)" = dnsmasq.servers ] ||
         die 'adblock-fast candidate has an unexpected DNS backend'
+    [ "$(uci_get "$candidate_dir" adblock-fast.config.dnsmasq_validity_check)" = 1 ] ||
+        die 'adblock-fast candidate DNS domain validity checking is not enabled'
     [ "$(grep -Fxc '0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto' \
         "$candidate_dir/crontab.root")" = 1 ] ||
         die 'adblock-fast automatic list update is not enabled exactly once'

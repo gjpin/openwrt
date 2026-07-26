@@ -5,7 +5,9 @@ Sources: [`modules/adblock-fast.sh`](../modules/adblock-fast.sh) and
 
 This module installs and enables `adblock-fast` and its LuCI application. It
 configures the service to use the `dnsmasq.servers` backend and forces DNS on
-ports 53 and 853 for all four managed interfaces.
+ports 53 and 853 for all four managed interfaces. Dnsmasq domain validity
+checking is enabled so malformed entries, including leading-dot domains, are
+removed from the generated blocklist before it is loaded.
 
 The module replaces every existing `file_url` source with a fixed set of 18
 enabled blocklists. These cover general advertising and tracking, native

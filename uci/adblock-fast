@@ -2,6 +2,7 @@
 
 set adblock-fast.config.enabled='1'
 set adblock-fast.config.dns='dnsmasq.servers'
+set adblock-fast.config.dnsmasq_validity_check='1'
 delete adblock-fast.config.dnsmasq_config_file_url
 set adblock-fast.config.config_update_enabled='0'
 set adblock-fast.config.force_dns='1'

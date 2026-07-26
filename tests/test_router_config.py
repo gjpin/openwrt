@@ -521,6 +521,7 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     system = json.loads((transaction_dir / "candidate" / "system").read_text())
     assert system["ntp"]["server"] == ["old"]
     adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
+    assert adblock["config"]["dnsmasq_validity_check"] == "1"
     root_crontab = (transaction_dir / "candidate" / "crontab.root").read_text()
     assert root_crontab == (
         "15 1 * * * /usr/bin/unrelated\n"
