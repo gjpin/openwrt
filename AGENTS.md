@@ -133,7 +133,10 @@ path over direct remote replacement of live config files.
 - Target hardware expectations are device-specific: DSA ports `lan1` through
   `lan5`, `br-lan`, and exactly one `2g` plus one `5g` `wifi-device`. Do not
   generalize without target evidence. Preflight rejects customized or ambiguous
-  stock base sections rather than guessing.
+  stock base sections rather than guessing. Audit every stock-base preflight
+  assumption against the pinned official OpenWrt 25.12.4 runtime, the selected
+  package payloads, and the GL-MT6000 target-generation scripts; keep the
+  preflight consistent with all three.
 - Do not commit real Wi-Fi passwords, WireGuard private or preshared keys,
   tokens, or other secrets. Keep placeholders in tracked templates; inject
   secrets only into the candidate at prepare time. Never print secret-bearing
