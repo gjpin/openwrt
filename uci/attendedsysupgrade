@@ -1,0 +1,3 @@
+# Feature overlay: check for upgrades whenever LuCI's status overview is loaded.
+
+set attendedsysupgrade.client.login_check_for_upgrades='1'

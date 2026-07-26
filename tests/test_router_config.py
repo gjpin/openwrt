@@ -197,9 +197,9 @@ def router():
     (proc_net / "udp").write_text("")
     for name in ("br-lan", "lan1", "lan2", "lan3", "lan4", "lan5"):
         (sys_net / name).mkdir(parents=True)
-    for name in ("network", "firewall", "wireless", "admin-access", "nts", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "admin-access", "attendedsysupgrade", "nts", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "uci" / name, overlays / name)
-    for name in ("network", "firewall", "wireless", "admin-access", "nts", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "admin-access", "attendedsysupgrade", "nts", "dns-over-https", "adblock-fast", "wireguard"):
         shutil.copy(REPO / "modules" / f"{name}.sh", modules / f"{name}.sh")
 
     network = {
@@ -254,6 +254,16 @@ def router():
             "enable": "1",
         },
     }
+    attendedsysupgrade = {
+        "server": {".type": "server", "url": "https://sysupgrade.openwrt.org"},
+        "client": {
+            ".type": "client",
+            "upgrade_packages": "1",
+            "auto_search": "0",
+            "advanced_mode": "0",
+            "login_check_for_upgrades": "0",
+        },
+    }
     for name, value in (
         ("network", network),
         ("firewall", firewall),
@@ -265,6 +275,7 @@ def router():
         ("chrony", chrony),
         ("uhttpd", uhttpd),
         ("dropbear", dropbear),
+        ("attendedsysupgrade", attendedsysupgrade),
     ):
         (config / name).write_text(json.dumps(value))
 
@@ -520,6 +531,11 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert dropbear["main"]["Port"] == "22"
     assert dropbear["main"]["enable"] == "1"
     assert "Interface" not in dropbear["main"]
+    attendedsysupgrade = json.loads(
+        (transaction_dir / "candidate" / "attendedsysupgrade").read_text()
+    )
+    assert attendedsysupgrade["client"]["login_check_for_upgrades"] == "1"
+    assert "login_check_for_upgrade" not in attendedsysupgrade["client"]
     system = json.loads((transaction_dir / "candidate" / "system").read_text())
     assert system["ntp"]["server"] == ["old"]
     adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
@@ -550,6 +566,8 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "candidate/uhttpd" in manifest
     assert "backup/dropbear" in manifest
     assert "candidate/dropbear" in manifest
+    assert "backup/attendedsysupgrade" in manifest
+    assert "candidate/attendedsysupgrade" in manifest
     assert "backup/chrony.conf" in manifest
     assert "candidate/chrony.conf" in manifest
     assert "backup/crontab.root" in manifest
@@ -590,6 +608,7 @@ def test_repeated_prepare_is_idempotent(router):
         "chrony",
         "uhttpd",
         "dropbear",
+        "attendedsysupgrade",
     ):
         shutil.copy(backups / first / "candidate" / name, config / name)
     _, second = prepare(env)
@@ -604,6 +623,7 @@ def test_repeated_prepare_is_idempotent(router):
         "chrony",
         "uhttpd",
         "dropbear",
+        "attendedsysupgrade",
     ):
         data = json.loads((backups / second / "candidate" / name).read_text())
         assert len(data) == len(set(data))
@@ -620,6 +640,32 @@ def test_repeated_prepare_is_idempotent(router):
     third_chrony_conf = (backups / third / "candidate" / "chrony.conf").read_text()
     assert third_chrony_conf == first_chrony_conf
     assert third_chrony_conf.count("authselectmode ignore") == 1
+
+
+@pytest.mark.parametrize("initial_value", ["0", "1"])
+def test_attendedsysupgrade_login_check_is_enabled_from_either_state(router, initial_value):
+    _, config, backups, _, env = router
+    attendedsysupgrade = json.loads((config / "attendedsysupgrade").read_text())
+    attendedsysupgrade["client"]["login_check_for_upgrades"] = initial_value
+    (config / "attendedsysupgrade").write_text(json.dumps(attendedsysupgrade))
+
+    _, transaction = prepare(env)
+    candidate = json.loads(
+        (backups / transaction / "candidate" / "attendedsysupgrade").read_text()
+    )
+    assert candidate["client"]["login_check_for_upgrades"] == "1"
+    assert "login_check_for_upgrade" not in candidate["client"]
+
+
+def test_check_base_rejects_missing_attendedsysupgrade_config(router):
+    _, config, backups, _, env = router
+    (config / "attendedsysupgrade").unlink()
+
+    result = run_router(env, "check-base", check=False)
+    assert result.returncode != 0
+    assert "missing or empty" in result.stderr
+    assert "attendedsysupgrade" in result.stderr
+    assert not backups.exists()
 
 
 @pytest.mark.parametrize(("contents", "error"), [
@@ -1628,7 +1674,8 @@ def test_setup_declares_fixed_module_order_and_all_members():
     positions = [source.rindex(call) for call in calls]
     assert positions == sorted(positions)
     for name in (
-        "base-packages", "network", "firewall", "wireless", "admin-access", "nts",
+        "base-packages", "network", "firewall", "wireless", "admin-access",
+        "attendedsysupgrade", "nts",
         "dns-over-https", "adblock-fast", "wireguard",
     ):
         assert f"modules/{name}.sh" in source

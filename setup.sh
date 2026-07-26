@@ -48,10 +48,10 @@ validate_wireguard_key() {
 validate_repository() {
     for repository_file in \
         router-config.sh router-config-rollback.init \
-        uci/network uci/firewall uci/wireless uci/admin-access uci/nts \
+        uci/network uci/firewall uci/wireless uci/admin-access uci/attendedsysupgrade uci/nts \
         uci/dns-over-https uci/adblock-fast uci/wireguard \
         modules/base-packages.sh modules/network.sh modules/firewall.sh \
-        modules/wireless.sh modules/admin-access.sh modules/nts.sh \
+        modules/wireless.sh modules/admin-access.sh modules/attendedsysupgrade.sh modules/nts.sh \
         modules/dns-over-https.sh modules/adblock-fast.sh modules/wireguard.sh; do
         [ -f "$SCRIPT_DIR/$repository_file" ] && [ -s "$SCRIPT_DIR/$repository_file" ] ||
             die "repository file is missing or empty: $repository_file"

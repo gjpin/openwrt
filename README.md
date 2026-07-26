@@ -13,6 +13,7 @@ confirmed within five minutes.
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
 - LuCI and SSH bound to the Pixel gateway only (`192.168.8.1` / `pixel`)
+- LuCI checks for attended sysupgrades when the Status Overview page loads
 - HTTPS DNS proxy upstreams with DNS bypass controls (DoT/DoQ port rejects)
 - Preferred authenticated NTP via `chrony-nts` (NTS), with unauthenticated
   NTP-by-IP cold-boot and outage fallback
@@ -151,6 +152,7 @@ the transaction helper. They are not standalone commands.
 - [Firewall](docs/firewall.md)
 - [Wireless](docs/wireless.md)
 - [Admin access](docs/admin-access.md)
+- [Attended Sysupgrade](docs/attendedsysupgrade.md)
 - [Encrypted NTP (NTS)](docs/nts.md)
 - [Encrypted DNS](docs/dns-over-https.md)
 - [Ad blocking](docs/adblock-fast.md)

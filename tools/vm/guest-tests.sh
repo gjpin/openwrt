@@ -58,7 +58,7 @@ fail() {
 }
 
 export_normalized_uci() {
-    for package in network firewall wireless dhcp system chrony https-dns-proxy adblock-fast uhttpd dropbear; do
+    for package in network firewall wireless dhcp system chrony https-dns-proxy adblock-fast uhttpd dropbear attendedsysupgrade; do
         uci show "$package"
     done |
         sed \
@@ -471,6 +471,8 @@ fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get firewall.wan.network)" = wan ] || fail 'WAN zone was not normalized'
 [ "$(uci -q get firewall.defaults.flow_offloading)" = 1 ] || fail 'software flow offloading is not enabled'
 [ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
+[ "$(uci -q get attendedsysupgrade.client.login_check_for_upgrades)" = 1 ] ||
+    fail 'LuCI login upgrade check is not enabled'
 [ "$(uci -q get dhcp.dnsmasq.rebind_protection)" = 1 ] ||
     fail 'dnsmasq rebind protection is not enabled'
 rebind_domain_count=$(

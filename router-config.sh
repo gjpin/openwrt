@@ -45,8 +45,8 @@ else
     MODULE_DIR=${LIBEXEC}.modules
 fi
 RUNTIME_MODULE_DIR=${ROUTER_CONFIG_RUNTIME_MODULE_DIR:-${LIBEXEC}.modules}
-UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast chrony uhttpd dropbear'
-MODULES='network firewall wireless admin-access nts dns-over-https adblock-fast wireguard'
+UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast chrony uhttpd dropbear attendedsysupgrade'
+MODULES='network firewall wireless admin-access attendedsysupgrade nts dns-over-https adblock-fast wireguard'
 
 die() {
     printf 'router-config: %s\n' "$*" >&2
@@ -199,6 +199,7 @@ preflight_base() {
     firewall_module_preflight
     wireless_module_preflight
     admin_access_preflight
+    attendedsysupgrade_preflight
 }
 
 preflight() {
@@ -248,6 +249,7 @@ validate_candidate() {
     firewall_module_validate "$candidate_dir"
     wireless_module_validate "$candidate_dir"
     admin_access_validate "$candidate_dir"
+    attendedsysupgrade_validate "$candidate_dir"
     nts_validate "$candidate_dir"
     dns_over_https_validate "$candidate_dir"
     adblock_fast_validate "$candidate_dir"
@@ -334,7 +336,7 @@ prepare() {
         : >"$transaction_dir/backup/crontab.root"
         : >"$transaction_dir/candidate/crontab.root"
     fi
-    for overlay_name in network firewall wireless admin-access nts dns-over-https adblock-fast; do
+    for overlay_name in network firewall wireless admin-access attendedsysupgrade nts dns-over-https adblock-fast; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
     wireguard_render_overlay "$UCI_DIR/wireguard" "$transaction_dir/overlay/wireguard"
@@ -344,6 +346,7 @@ prepare() {
     firewall_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/firewall"
     wireless_module_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireless"
     admin_access_stage "$transaction_dir/candidate" "$transaction_dir/overlay/admin-access"
+    attendedsysupgrade_stage "$transaction_dir/candidate" "$transaction_dir/overlay/attendedsysupgrade"
     nts_stage "$transaction_dir/candidate" "$transaction_dir/overlay/nts"
     dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
     adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
