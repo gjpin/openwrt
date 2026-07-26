@@ -13,9 +13,14 @@ Windows/Apple/Samsung tracking, smart TVs and mobile devices, DNS bypass,
 gaming, CNAME trackers, and malicious domains. Insecure downloads, non-ASCII
 entries, and automatic source-configuration updates are disabled.
 
+Automatic list updates are enabled separately: cron force-downloads all enabled
+lists every day at 04:00 with `/etc/init.d/adblock-fast dl`. The transaction
+replaces any existing AdBlock-Fast download schedule with exactly one managed
+entry while preserving unrelated root cron jobs. The root crontab is backed up,
+checksummed, installed, and restored together with the UCI candidate.
+
 This replacement does not preserve or migrate an existing adblock-fast source
 configuration. Package installation and init enablement are outside rollback;
 the UCI configuration itself is protected by the transaction.
 
 [Back to the README](../README.md)
-

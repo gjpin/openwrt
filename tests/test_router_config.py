@@ -177,11 +177,17 @@ def router():
     modules = tmp_path / "modules"
     modules_conf = tmp_path / "etc-modules.conf"
     chrony_conf = tmp_path / "chrony.conf"
+    root_crontab = tmp_path / "root.crontab"
     config.mkdir(); bin_dir.mkdir(); overlays.mkdir(); modules.mkdir(); proc_net.mkdir(parents=True)
     modules_conf.write_text("# test modules.conf\n")
     chrony_conf.write_text(
         "driftfile /var/run/chrony/chrony.drift\n"
         "confdir /var/etc/chrony.d\n"
+    )
+    root_crontab.write_text(
+        "15 1 * * * /usr/bin/unrelated\n"
+        "# 30 2 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto-disabled\n"
+        "45 3 * * 1 /etc/init.d/adblock-fast dl # old-adblock-schedule\n"
     )
     socket_lines = "".join(
         f"   {index}: 0100007F:{port:04X} 00000000:0000 0A\n"
@@ -322,6 +328,7 @@ exit 0
         "https-dns-proxy-init",
         "dnsmasq-init",
         "adblock-init",
+        "cron-init",
     ):
         services[name] = bin_dir / name
         write_executable(services[name], service_source)
@@ -341,6 +348,7 @@ exit 0
         "ROUTER_CONFIG_MODULE_DIR": str(modules),
         "ROUTER_CONFIG_MODULES_CONF": str(modules_conf),
         "ROUTER_CONFIG_CHRONY_CONF": str(chrony_conf),
+        "ROUTER_CONFIG_ROOT_CRONTAB": str(root_crontab),
         "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
         "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
         "ROUTER_CONFIG_UHTTPD_INIT": str(services["uhttpd-init"]),
@@ -350,6 +358,7 @@ exit 0
         "ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT": str(services["https-dns-proxy-init"]),
         "ROUTER_CONFIG_DNSMASQ_INIT": str(services["dnsmasq-init"]),
         "ROUTER_CONFIG_ADBLOCK_INIT": str(services["adblock-init"]),
+        "ROUTER_CONFIG_CRON_INIT": str(services["cron-init"]),
         "ROUTER_CONFIG_TIMEOUT": "2",
         "ROUTER_CONFIG_POLL_INTERVAL": "0.05",
         "ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS": "500",
@@ -512,6 +521,11 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     system = json.loads((transaction_dir / "candidate" / "system").read_text())
     assert system["ntp"]["server"] == ["old"]
     adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
+    root_crontab = (transaction_dir / "candidate" / "crontab.root").read_text()
+    assert root_crontab == (
+        "15 1 * * * /usr/bin/unrelated\n"
+        "0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto\n"
+    )
     sources = {name: section for name, section in adblock.items() if section[".type"] == "file_url"}
     assert "unmanaged" not in adblock
     assert len(sources) == 19
@@ -535,8 +549,11 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "candidate/dropbear" in manifest
     assert "backup/chrony.conf" in manifest
     assert "candidate/chrony.conf" in manifest
+    assert "backup/crontab.root" in manifest
+    assert "candidate/crontab.root" in manifest
     assert (transaction_dir / "candidate" / "wireless").stat().st_mode & 0o777 == 0o600
     assert (transaction_dir / "candidate" / "chrony.conf").stat().st_mode & 0o777 == 0o600
+    assert (transaction_dir / "candidate" / "crontab.root").stat().st_mode & 0o777 == 0o600
     rendered = (transaction_dir / "overlay" / "wireguard").read_text()
     assert env["VPN_KEY"] not in rendered
     assert env["VPN_PSK"] not in rendered
@@ -887,6 +904,8 @@ def test_apply_confirm_and_manual_rollback(router):
     original_modules = modules_conf.read_text()
     chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
     original_chrony_conf = chrony_conf.read_text()
+    root_crontab = Path(env["ROUTER_CONFIG_ROOT_CRONTAB"])
+    original_root_crontab = root_crontab.read_text()
     _, transaction = prepare(env)
     process = subprocess.Popen(
         [str(REPO / "router-config.sh"), "apply", transaction], env=env,
@@ -922,12 +941,16 @@ def test_apply_confirm_and_manual_rollback(router):
     assert modules_conf.read_text().count("options mt7915e wed_enable=Y") == 1
     assert chrony_conf.stat().st_mode & 0o777 == 0o644
     assert "authselectmode ignore\nconfdir /var/etc/chrony.d\n" in chrony_conf.read_text()
+    assert root_crontab.read_text().count(
+        "0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto"
+    ) == 1
     proxy = json.loads((config / "https-dns-proxy").read_text())
     assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
     run_router(env, "rollback", transaction)
     assert {name: (config / name).read_text() for name in originals} == originals
     assert modules_conf.read_text() == original_modules
     assert chrony_conf.read_text() == original_chrony_conf
+    assert root_crontab.read_text() == original_root_crontab
     assert chrony_conf.stat().st_mode & 0o777 == 0o644
 
 
@@ -938,6 +961,8 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     original_modules = modules_conf.read_text()
     chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
     original_chrony_conf = chrony_conf.read_text()
+    root_crontab = Path(env["ROUTER_CONFIG_ROOT_CRONTAB"])
+    original_root_crontab = root_crontab.read_text()
     env["ROUTER_CONFIG_TIMEOUT"] = "0.15"
     _, transaction = prepare(env)
     result = run_router(env, "apply", transaction, check=False)
@@ -953,6 +978,7 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     shutil.copy(backups / transaction / "candidate" / "network", config / "network")
     shutil.copy(backups / transaction / "candidate" / "modules.conf", modules_conf)
     shutil.copy(backups / transaction / "candidate" / "chrony.conf", chrony_conf)
+    shutil.copy(backups / transaction / "candidate" / "crontab.root", root_crontab)
     (backups / transaction / "pending").touch()
     (backups / transaction / "state").write_text("pending\n")
     (backups / transaction / "watchdog.pid").write_text("999999\n")
@@ -960,6 +986,7 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     assert (config / "network").read_text() == original
     assert modules_conf.read_text() == original_modules
     assert chrony_conf.read_text() == original_chrony_conf
+    assert root_crontab.read_text() == original_root_crontab
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
     assert not (backups / transaction / "pending").exists()
     assert not (backups / transaction / "watchdog.pid").exists()

@@ -20,9 +20,11 @@ CHRONYD_INIT=${ROUTER_CONFIG_CHRONYD_INIT:-/etc/init.d/chronyd}
 HTTPS_DNS_PROXY_INIT=${ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT:-/etc/init.d/https-dns-proxy}
 DNSMASQ_INIT=${ROUTER_CONFIG_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
 ADBLOCK_INIT=${ROUTER_CONFIG_ADBLOCK_INIT:-/etc/init.d/adblock-fast}
+CRON_INIT=${ROUTER_CONFIG_CRON_INIT:-/etc/init.d/cron}
 PROC_NET_DIR=${ROUTER_CONFIG_PROC_NET_DIR:-/proc/net}
 MODULES_CONF=${ROUTER_CONFIG_MODULES_CONF:-/etc/modules.conf}
 CHRONY_CONF=${ROUTER_CONFIG_CHRONY_CONF:-/etc/chrony/chrony.conf}
+ROOT_CRONTAB=${ROUTER_CONFIG_ROOT_CRONTAB:-/etc/crontabs/root}
 TIMEOUT=${ROUTER_CONFIG_TIMEOUT:-300}
 POLL_INTERVAL=${ROUTER_CONFIG_POLL_INTERVAL:-1}
 WATCHDOG_READY_ATTEMPTS=${ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS:-10}
@@ -265,6 +267,7 @@ write_manifest() {
     done
     manifest_files="$manifest_files backup/modules.conf candidate/modules.conf"
     manifest_files="$manifest_files backup/chrony.conf candidate/chrony.conf"
+    manifest_files="$manifest_files backup/crontab.root candidate/crontab.root"
     # Intentional splitting of the internally constructed relative path list.
     # shellcheck disable=SC2086
     (cd "$transaction_dir" && sha256sum $manifest_files) >"$transaction_dir/manifest.sha256"
@@ -323,6 +326,13 @@ prepare() {
     fi
     cp "$CHRONY_CONF" "$transaction_dir/backup/chrony.conf"
     cp "$CHRONY_CONF" "$transaction_dir/candidate/chrony.conf"
+    if [ -f "$ROOT_CRONTAB" ]; then
+        cp "$ROOT_CRONTAB" "$transaction_dir/backup/crontab.root"
+        cp "$ROOT_CRONTAB" "$transaction_dir/candidate/crontab.root"
+    else
+        : >"$transaction_dir/backup/crontab.root"
+        : >"$transaction_dir/candidate/crontab.root"
+    fi
     for overlay_name in network firewall wireless admin-access nts dns-over-https adblock-fast; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
@@ -337,7 +347,8 @@ prepare() {
     dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
     adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
     wireguard_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireguard"
-    chmod 600 "$transaction_dir/candidate/modules.conf" "$transaction_dir/candidate/chrony.conf"
+    chmod 600 "$transaction_dir/candidate/modules.conf" "$transaction_dir/candidate/chrony.conf" \
+        "$transaction_dir/candidate/crontab.root"
     validate_candidate "$transaction_dir/candidate"
     write_manifest "$transaction_dir"
     printf '%s\n' prepared >"$transaction_dir/state"
@@ -379,11 +390,22 @@ install_chrony_conf() {
     mv -f "$install_temp" "$CHRONY_CONF" || return 1
 }
 
+install_root_crontab() {
+    source_dir=$1
+    crontab_parent=${ROOT_CRONTAB%/*}
+    [ "$crontab_parent" = "$ROOT_CRONTAB" ] || mkdir -p "$crontab_parent" || return 1
+    install_temp=$ROOT_CRONTAB.router-config.$$
+    cp "$source_dir/crontab.root" "$install_temp" || return 1
+    chmod 600 "$install_temp" || return 1
+    mv -f "$install_temp" "$ROOT_CRONTAB" || return 1
+}
+
 install_candidate() {
     candidate_dir=$1
     install_uci_files "$candidate_dir" || return 1
     install_modules_conf "$candidate_dir" || return 1
     install_chrony_conf "$candidate_dir" || return 1
+    install_root_crontab "$candidate_dir" || return 1
 }
 
 https_dns_proxy_listen_ports() {
@@ -484,6 +506,10 @@ reload_services() {
         RELOAD_FAILED_STEP=adblock-fast
         return 1
     fi
+    if ! "$CRON_INIT" reload; then
+        RELOAD_FAILED_STEP=cron
+        return 1
+    fi
 }
 
 restore_transaction() {
@@ -491,6 +517,7 @@ restore_transaction() {
     install_uci_files "$transaction_dir/backup" || die 'CRITICAL: UCI backup restoration failed'
     install_modules_conf "$transaction_dir/backup" || die 'CRITICAL: modules.conf backup restoration failed'
     install_chrony_conf "$transaction_dir/backup" || die 'CRITICAL: chrony.conf backup restoration failed'
+    install_root_crontab "$transaction_dir/backup" || die 'CRITICAL: root crontab backup restoration failed'
     if [ "${2-}" != boot ]; then
         reload_services || die 'CRITICAL: backups restored but a service reload failed'
     fi

@@ -475,6 +475,11 @@ fw4 check || fail 'fw4 rejected installed configuration'
 grep -qx 'options mt7915e wed_enable=Y' /etc/modules.conf || fail 'WED is not enabled in modules.conf'
 wed_count=$(grep -c 'wed_enable=' /etc/modules.conf || :)
 [ "$wed_count" = 1 ] || fail 'modules.conf has duplicate WED options'
+adblock_cron_count=$(
+    grep -Fxc '0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto' \
+        /etc/crontabs/root || :
+)
+[ "$adblock_cron_count" = 1 ] || fail 'AdBlock-Fast automatic list update is not enabled exactly once'
 [ "$(uci -q get chrony.cloudflare.nts)" = 1 ] || fail 'Cloudflare NTS server is missing'
 [ "$(uci -q get chrony.netnod.nts)" = 1 ] || fail 'Netnod NTS server is missing'
 [ "$(uci -q get chrony.time_nl.nts)" = 1 ] || fail 'time.nl NTS server is missing'

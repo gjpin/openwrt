@@ -144,8 +144,8 @@ reverted later with:
 Package installation and init-service enablement happen before the protected
 configuration transaction and are not removed by rollback. Backups are kept in
 `/root/router-config-backups`; the transaction also protects
-`/etc/modules.conf` and `/etc/chrony/chrony.conf`. Retain the separate
-off-router backup too.
+`/etc/modules.conf`, `/etc/chrony/chrony.conf`, and `/etc/crontabs/root`.
+Retain the separate off-router backup too.
 
 ## Development checks
 

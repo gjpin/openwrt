@@ -17,6 +17,7 @@ adblock_fast_install() {
 adblock_fast_stage() {
     candidate_dir=$1
     overlay_file=$2
+    crontab_file=$candidate_dir/crontab.root
 
     adblock_fast_show=$(uci -q -c "$candidate_dir" show adblock-fast) ||
         die 'failed to inspect adblock-fast candidate sources'
@@ -29,6 +30,24 @@ adblock_fast_stage() {
         done || die 'failed to remove existing adblock-fast sources'
 
     apply_overlay "$candidate_dir" "$overlay_file"
+
+    crontab_temp=$crontab_file.new.$$
+    awk '
+        {
+            command_field = 6
+            if ($1 == "#") {
+                command_field = 7
+            }
+            if ($command_field == "/etc/init.d/adblock-fast" &&
+                $(command_field + 1) == "dl") {
+                next
+            }
+            print
+        }
+    ' "$crontab_file" >"$crontab_temp" ||
+        die 'failed to stage adblock-fast automatic list update'
+    printf '%s\n' '0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto' >>"$crontab_temp"
+    mv "$crontab_temp" "$crontab_file"
 }
 
 adblock_fast_validate() {
@@ -37,6 +56,23 @@ adblock_fast_validate() {
         die 'adblock-fast candidate is not enabled'
     [ "$(uci_get "$candidate_dir" adblock-fast.config.dns)" = dnsmasq.servers ] ||
         die 'adblock-fast candidate has an unexpected DNS backend'
+    [ "$(grep -Fxc '0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto' \
+        "$candidate_dir/crontab.root")" = 1 ] ||
+        die 'adblock-fast automatic list update is not enabled exactly once'
+    [ "$(awk '
+        {
+            command_field = 6
+            if ($1 == "#") {
+                command_field = 7
+            }
+            if ($command_field == "/etc/init.d/adblock-fast" &&
+                $(command_field + 1) == "dl") {
+                count++
+            }
+        }
+        END { print count + 0 }
+    ' "$candidate_dir/crontab.root")" = 1 ] ||
+        die 'adblock-fast candidate contains duplicate automatic list updates'
     file_url_count=$(uci -q -c "$candidate_dir" show adblock-fast |
         grep -Ec "=('file_url'|file_url)\$") || :
     [ "$file_url_count" = 19 ] ||
