@@ -278,7 +278,10 @@ def verify_stock_runtime(console: SerialConsole) -> None:
         "[ \"$(uci -q get 'firewall.@defaults[0].syn_flood')\" = 1 ] && "
         "[ \"$(uci -q get 'firewall.@defaults[0].input')\" = REJECT ] && "
         "[ \"$(uci -q get 'firewall.@defaults[0].output')\" = ACCEPT ] && "
-        "[ \"$(uci -q get 'firewall.@defaults[0].forward')\" = REJECT ] && "
+        "[ \"$(uci -q get 'firewall.@defaults[0].forward')\" = REJECT ]",
+        30,
+    )
+    console.command(
         "[ \"$(uci -q get 'firewall.@zone[0].name')\" = lan ] && "
         "[ \"$(uci -q get 'firewall.@zone[0].input')\" = ACCEPT ] && "
         "[ \"$(uci -q get 'firewall.@zone[0].output')\" = ACCEPT ] && "

@@ -17,7 +17,8 @@ confirmed within five minutes.
 - Preferred authenticated NTP via `chrony-nts` (NTS), with unauthenticated
   NTP-by-IP cold-boot and outage fallback
 - DNS-based ad and tracker blocking
-- An IPv4-only WireGuard server attached to the trusted Pixel zone
+- An IPv4-only WireGuard server attached to the trusted Pixel zone, with no
+  preconfigured client peers
 - Static IPv4 WAN behind an ISP router (`192.168.2.2/24`, gateway
   `192.168.2.1`), with managed VLANs on `192.168.8`–`11.0/24` (double NAT)
 - IPv4-only WAN and managed VLANs, with IPv6 delegation and advertisements disabled
@@ -79,14 +80,13 @@ must run on the target router as `root`; do not run it on a workstation.
    export VPN_PORT='42451'
    export VPN_KEY="$(wg genkey)"
    export VPN_ADDR='10.10.0.1/24'
-   client_private=$(wg genkey)
-   export VPN_PUB="$(printf '%s' "$client_private" | wg pubkey)"
-   export VPN_PSK="$(wg genpsk)"
    ./setup.sh --recovery-ready
    ```
 12. Access 192.168.8.1 via 2 SSH: root@192.168.8.1
 13. Run `/usr/libexec/router-config confirm TRANSACTION_ID`
 14. Run `reboot`
+15. Create WireGuard peers by running add-wireguard-peers.sh in Flint (MUST add the peers in the TODO section)
+  - Get the wireguard configs from /root/wireguard-clients
 
 ## Development checks
 
@@ -133,6 +133,8 @@ It cannot emulate the MT7986/MT7531 switch, MT7915 RF behavior, 2.5 GbE PHYs,
 bootloader, or eMMC recovery. Physical deployment therefore still requires an
 off-router backup, local Ethernet or serial recovery, and real port, Wi-Fi,
 reboot, WireGuard, DNS, and rollback acceptance tests.
+Setup creates the WireGuard server without client peers; add a peer separately
+before testing its handshake and routing.
 
 ## Module reference
 

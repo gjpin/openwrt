@@ -372,8 +372,6 @@ exit 0
         "VPN_PORT": "42451",
         "VPN_KEY": "private-secret",
         "VPN_ADDR": "10.10.0.1/24",
-        "VPN_PUB": "public-key",
-        "VPN_PSK": "preshared-secret",
     }
     try:
         yield tmp_path, config, backups, overlays, env
@@ -557,13 +555,16 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert (transaction_dir / "candidate" / "crontab.root").stat().st_mode & 0o777 == 0o600
     rendered = (transaction_dir / "overlay" / "wireguard").read_text()
     assert env["VPN_KEY"] not in rendered
-    assert env["VPN_PSK"] not in rendered
     assert "${" not in rendered
     assert candidate["wan"]["ipv6"] == "0"
     assert "wan6" not in candidate
     assert "ula_prefix" not in candidate["globals"]
     assert candidate["wgserver"]["addresses"] == ["10.10.0.1/24"]
-    assert candidate["wgclient"]["allowed_ips"] == ["10.10.0.2/32"]
+    assert "wgclient" not in candidate
+    assert not any(
+        section.get(".type") == "wireguard_wgserver"
+        for section in candidate.values()
+    )
     firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
     assert firewall["wan"]["network"] == ["wan"]
 
@@ -827,7 +828,7 @@ def test_setup_rejects_invalid_channel_before_mutation(router):
     marker = root / "mutation-attempted"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{marker}'\n")
     key = "A" * 43 + "="
-    env.update({"VPN_KEY": key, "VPN_PUB": key, "VPN_PSK": key, "CHANNEL": "12"})
+    env.update({"VPN_KEY": key, "CHANNEL": "12"})
     result = subprocess.run(
         [str(REPO / "setup.sh"), "--recovery-ready"],
         env=env, text=True, capture_output=True,
@@ -1253,7 +1254,7 @@ def test_setup_rejects_an_incomplete_repository_before_mutation(router):
     mutation_marker = root / "mutation-attempted"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{mutation_marker}'\n")
     key = "A" * 43 + "="
-    env.update({"VPN_KEY": key, "VPN_PUB": key, "VPN_PSK": key})
+    env.update({"VPN_KEY": key})
     result = subprocess.run(
         [str(setup_copy), "--recovery-ready"], env=env, text=True, capture_output=True,
     )
@@ -1267,7 +1268,7 @@ def test_setup_rejects_missing_country_before_mutation(router):
     marker = root / "mutation-attempted"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{marker}'\n")
     key = "A" * 43 + "="
-    env.update({"VPN_KEY": key, "VPN_PUB": key, "VPN_PSK": key})
+    env.update({"VPN_KEY": key})
     env.pop("COUNTRY", None)
     result = subprocess.run(
         [str(REPO / "setup.sh"), "--recovery-ready"],
@@ -1288,8 +1289,6 @@ def test_setup_validates_all_inputs_before_mutation(router):
         "VPN_PORT": "42451",
         "VPN_KEY": key,
         "VPN_ADDR": "10.10.0.1/24",
-        "VPN_PUB": key,
-        "VPN_PSK": key,
     })
     result = subprocess.run(
         [str(REPO / "setup.sh"), "--recovery-ready"],

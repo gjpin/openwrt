@@ -393,8 +393,6 @@ export VPN_IF='wgserver'
 export VPN_PORT='42451'
 export VPN_KEY="$server_private"
 export VPN_ADDR='10.10.0.1/24'
-export VPN_PUB="$client_public"
-export VPN_PSK="$preshared"
 
 run_and_confirm() {
     setup_pass=${1:-unnamed}
@@ -472,6 +470,12 @@ fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get firewall.wan.network)" = wan ] || fail 'WAN zone was not normalized'
 [ "$(uci -q get firewall.defaults.flow_offloading)" = 1 ] || fail 'software flow offloading is not enabled'
 [ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
+[ -z "$(uci -q show network | sed -n "/=wireguard_${VPN_IF}$/p")" ] ||
+    fail 'fresh installation created a WireGuard peer'
+[ "$(uci -q get "network.${VPN_IF}.addresses")" = "$VPN_ADDR" ] ||
+    fail 'WireGuard server address is not installed'
+wg show "$VPN_IF" >/dev/null || fail 'WireGuard server interface is not available'
+[ -z "$(wg show "$VPN_IF" peers)" ] || fail 'fresh WireGuard server has a runtime peer'
 grep -qx 'options mt7915e wed_enable=Y' /etc/modules.conf || fail 'WED is not enabled in modules.conf'
 wed_count=$(grep -c 'wed_enable=' /etc/modules.conf || :)
 [ "$wed_count" = 1 ] || fail 'modules.conf has duplicate WED options'
@@ -1094,13 +1098,16 @@ if [ "$doq_after" -le "$doq_before" ]; then
     } >/tmp/vm-test-failure-detail 2>&1
     fail 'DoQ rejection counter did not increase'
 fi
+printf '%s\n' "$preshared" >/tmp/client-psk
+chmod 600 /tmp/client-psk
+wg set "$VPN_IF" peer "$client_public" preshared-key /tmp/client-psk \
+    allowed-ips 10.10.0.2/32
 uci set firewall.allow_wireguard.enabled='0'
 uci commit firewall
 /etc/init.d/firewall reload
 ip netns exec wanclient ip link add wgtest type wireguard
 printf '%s\n' "$client_private" >/tmp/client-private
-printf '%s\n' "$preshared" >/tmp/client-psk
-chmod 600 /tmp/client-private /tmp/client-psk
+chmod 600 /tmp/client-private
 ip netns exec wanclient wg set wgtest private-key /tmp/client-private \
     peer "$server_public" preshared-key /tmp/client-psk allowed-ips 10.10.0.1/32 \
     endpoint 198.18.0.1:42451

@@ -63,7 +63,7 @@ validate_inputs() {
     CHANNEL=${CHANNEL:-52}
     for variable_name in \
         PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
-        VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK COUNTRY; do
+        VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY; do
         require_variable "$variable_name"
     done
     for variable_name in PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD; do
@@ -99,8 +99,6 @@ validate_inputs() {
         *[!0-9./]*) die 'VPN_ADDR must contain only an IPv4 address and prefix length' ;;
     esac
     validate_wireguard_key VPN_KEY
-    validate_wireguard_key VPN_PUB
-    validate_wireguard_key VPN_PSK
 }
 
 # Validate the entire public environment contract before the first router
@@ -108,7 +106,7 @@ validate_inputs() {
 validate_inputs
 validate_repository
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
-export VPN_IF VPN_PORT VPN_KEY VPN_ADDR VPN_PUB VPN_PSK COUNTRY CHANNEL
+export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL
 
 # Reject unsupported or ambiguous stock configuration before package
 # installation or init-service enablement performs the first router mutation.

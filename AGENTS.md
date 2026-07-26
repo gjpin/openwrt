@@ -118,6 +118,9 @@ path over direct remote replacement of live config files.
   load. WED bypasses AQL; do not treat AQL tuning as compatible with WED.
 - WAN and managed VLANs are IPv4-only. Do not reintroduce IPv6 delegation, RA,
   DHCPv6, NDP, `wan6`, or ULA unless that is an intentional, tested change.
+- Fresh setup creates the IPv4 WireGuard server with no client peers. Add a
+  peer separately before testing a handshake or client routing; do not restore
+  an installer-managed default peer.
 - Overlays update an existing stock configuration. Checked-in `uci/network` has
   no loopback or globals sections and does not create `network.wan`; it pins
   WAN addressing on the stock section. Checked-in `uci/firewall` has no
@@ -160,7 +163,7 @@ path over direct remote replacement of live config files.
 - Validate every required variable before the first router mutation. Required
   secrets/settings are `PIXEL_WIFI_PASSWORD`, `THINGS_WIFI_PASSWORD`,
   `GUEST_WIFI_PASSWORD`, `IOT_WIFI_PASSWORD`, `COUNTRY`, `VPN_IF`, `VPN_PORT`,
-  `VPN_KEY`, `VPN_ADDR`, `VPN_PUB`, and `VPN_PSK`. There is no `VPN_ADDR6`.
+  `VPN_KEY`, and `VPN_ADDR`. There is no `VPN_ADDR6`.
   `COUNTRY` is a required two-letter ISO code with no default. Optional
   `CHANNEL` defaults to `52` (5 GHz DFS); the wireless module also forces
   5 GHz `htmode=HE80`.
