@@ -89,6 +89,9 @@ must run on the target router as `root`; do not run it on a workstation.
 14. Run `reboot`
 15. Create WireGuard peers by running add-wireguard-peers.sh in Flint (MUST add the peers in the TODO section)
   - Get the wireguard configs from /root/wireguard-clients
+  - Create a port forward in ISP router for wireguard
+16. Add Flint to ISP router DMZ
+
 
 ## Development checks
 
