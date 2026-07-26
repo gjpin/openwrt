@@ -44,36 +44,18 @@ must run on the target router as `root`; do not run it on a workstation.
 
 ## Run on the OpenWrt router
 
-1. Before connecting the OpenWrt WAN port, configure the ISP router LAN as
-   `192.168.2.1/24`. Reserve `192.168.2.2` for the OpenWrt WAN MAC address or
-   exclude it from the ISP router's dynamic DHCP pool. Reconnect to the ISP
-   router at `192.168.2.1` and verify its internet service before continuing.
-   Do not proceed if the ISP router cannot use this subnet: the separate transit
-   avoids an address collision with fresh OpenWrt LAN `192.168.1.1/24`.
-
-   Open two local or recovery-capable sessions to OpenWrt. Before apply,
-   `ROUTER_ADDRESS` is typically the stock LAN address (`192.168.1.1`). After
-   apply, use the Pixel gateway (`192.168.8.1`) for management and confirmation.
-   Plug the OpenWrt WAN port into the ISP router and confirm stock WAN has
-   working internet; `uclient-fetch` and `apk` need it before setup mutates
-   anything. In the first session, create a backup:
-
-   ```sh
-   ssh root@ROUTER_ADDRESS
-   sysupgrade -b /tmp/openwrt-backup.tar.gz
-   ```
-
-   From a workstation terminal, copy `/tmp/openwrt-backup.tar.gz` off the router
-   before continuing:
-
-   ```sh
-   scp root@ROUTER_ADDRESS:/tmp/openwrt-backup.tar.gz ./openwrt-backup.tar.gz
-   ```
-
-2. In the router session, download and extract the current `main` source archive.
-   Git is not required. A fresh temporary directory avoids mixing files from an
-   earlier download:
-
+1. Set ISP router LAN address to: 192.168.2.1/24
+2. Connect ISP router to Flint 2 WAN port
+  - Physical ports: Any ISP router LAN port -> Flint 2 WAN port
+3. Assign 192.168.2.2 for Flint 2
+4. Connect to Flint 2 Wifi
+5. Access Flint 2 Admin UI: 192.168.8.1
+6. Upgrade Flint 2 to upstream OpenWRT
+  - System -> Upgrade -> Firmware Local Upgrade
+7. Connect to Flint via ethernet
+8. Access 192.168.1.1 via 2 SSH: root@192.168.1.1
+9. Disable ISP wifi network: 2.4 GHz, 5 GHz, and Guest Wi-Fi
+10. Download script:
    ```sh
    set -eu
    archive="/tmp/openwrt-main.$$.tar.gz"
@@ -84,14 +66,7 @@ must run on the target router as `root`; do not run it on a workstation.
    tar -xzf "$archive" -C "$source_root"
    cd "$source_root/openwrt-main"
    ```
-
-   This intentionally follows the mutable `main` branch without a pinned digest.
-   Review the current repository state before running it on a router.
-
-3. Export the deployment secrets. Replace every
-   example value; do not save real values in this repository or pass them as
-   command-line arguments:
-
+11. Set env vars and run setup:
    ```sh
    export PIXEL_WIFI_PASSWORD='replace-me'
    export THINGS_WIFI_PASSWORD='replace-me'
@@ -109,43 +84,9 @@ must run on the target router as `root`; do not run it on a workstation.
    export VPN_PSK="$(wg genpsk)"
    ./setup.sh --recovery-ready
    ```
-
-   Keep `$client_private` for the peer device; only its public key is exported as
-   `VPN_PUB`. After apply, WAN is static `192.168.2.2/24` behind the ISP
-   router. For inbound WireGuard peers, add an ISP-router UDP port forward to
-   `192.168.2.2` for `VPN_PORT`.
-
-4. After apply, stock LAN `192.168.1.1` is gone, so the first SSH session usually
-   drops. That is expected: the pending watchdog still runs. Open (or keep) the
-   second recovery-capable session on the Pixel gateway (`192.168.8.1`, Ethernet
-   on a LAN port), test management access, DHCP, DNS, and expected internet
-   access from the appropriate VLANs, then run the exact confirmation command
-   printed by setup:
-
-   ```sh
-   /usr/libexec/router-config confirm TRANSACTION_ID
-   ```
-
-   After confirm, reboot so Wireless Ethernet Dispatch (WED,
-   `mt7915e wed_enable`) loads. Do not reboot while the transaction is still
-   pending.
-
-If confirmation is not received within five minutes, a detached watchdog in
-its own session restores the saved configuration. The watchdog ignores SIGHUP,
-so closing or losing the applying SSH session does not cancel timeout rollback.
-If the router reboots while a transaction is pending, early-boot recovery
-remains the fallback and restores the same backup. A confirmed change can be
-reverted later with:
-
-```sh
-/usr/libexec/router-config rollback TRANSACTION_ID
-```
-
-Package installation and init-service enablement happen before the protected
-configuration transaction and are not removed by rollback. Backups are kept in
-`/root/router-config-backups`; the transaction also protects
-`/etc/modules.conf`, `/etc/chrony/chrony.conf`, and `/etc/crontabs/root`.
-Retain the separate off-router backup too.
+12. Access 192.168.8.1 via 2 SSH: root@192.168.8.1
+13. Run `/usr/libexec/router-config confirm TRANSACTION_ID`
+14. Run `reboot`
 
 ## Development checks
 
