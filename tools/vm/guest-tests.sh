@@ -389,6 +389,7 @@ export GUEST_WIFI_PASSWORD='vm-guest-password'
 export IOT_WIFI_PASSWORD='vm-iot-password'
 export COUNTRY='US'
 export CHANNEL='36'
+export DNS_REBIND_DOMAIN='VM.Example'
 export VPN_IF='wgserver'
 export VPN_PORT='42451'
 export VPN_KEY="$server_private"
@@ -470,6 +471,16 @@ fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get firewall.wan.network)" = wan ] || fail 'WAN zone was not normalized'
 [ "$(uci -q get firewall.defaults.flow_offloading)" = 1 ] || fail 'software flow offloading is not enabled'
 [ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
+[ "$(uci -q get dhcp.dnsmasq.rebind_protection)" = 1 ] ||
+    fail 'dnsmasq rebind protection is not enabled'
+rebind_domain_count=$(
+    uci -q show dhcp.dnsmasq.rebind_domain |
+        grep -Fxc "dhcp.dnsmasq.rebind_domain='vm.example'" || :
+)
+[ "$rebind_domain_count" = 1 ] ||
+    fail 'DNS rebind exception is not installed exactly once'
+grep -q '^rebind-domain-ok=/vm.example/$' /var/etc/dnsmasq.conf.* ||
+    fail 'generated dnsmasq configuration lacks the DNS rebind exception'
 [ -z "$(uci -q show network | sed -n "/=wireguard_${VPN_IF}$/p")" ] ||
     fail 'fresh installation created a WireGuard peer'
 [ "$(uci -q get "network.${VPN_IF}.addresses")" = "$VPN_ADDR" ] ||

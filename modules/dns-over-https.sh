@@ -2,6 +2,56 @@
 
 # https-dns-proxy package installation and transaction callbacks.
 
+dns_over_https_preflight() {
+    DNS_REBIND_DOMAIN=${DNS_REBIND_DOMAIN:-}
+    [ -n "$DNS_REBIND_DOMAIN" ] || {
+        export DNS_REBIND_DOMAIN
+        return 0
+    }
+
+    DNS_REBIND_DOMAIN=$(
+        # The public contract is deliberately ASCII-only; explicit alphabets
+        # also work with BusyBox tr implementations lacking class expansion.
+        # shellcheck disable=SC2018,SC2019
+        printf '%s' "$DNS_REBIND_DOMAIN" |
+            tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz'
+    )
+    domain_length=${#DNS_REBIND_DOMAIN}
+    [ "$domain_length" -le 253 ] ||
+        die 'DNS_REBIND_DOMAIN must not exceed 253 characters'
+    case $DNS_REBIND_DOMAIN in
+        *.*) ;;
+        *) die 'DNS_REBIND_DOMAIN must contain at least two DNS labels' ;;
+    esac
+    case $DNS_REBIND_DOMAIN in
+        *[!a-z0-9.-]* | .* | *. | *..*)
+            die 'DNS_REBIND_DOMAIN must be one ASCII apex domain using valid DNS labels'
+            ;;
+    esac
+
+    remaining_labels=$DNS_REBIND_DOMAIN
+    while :; do
+        case $remaining_labels in
+            *.*)
+                domain_label=${remaining_labels%%.*}
+                remaining_labels=${remaining_labels#*.}
+                ;;
+            *)
+                domain_label=$remaining_labels
+                remaining_labels=
+                ;;
+        esac
+        [ "${#domain_label}" -le 63 ] ||
+            die 'DNS_REBIND_DOMAIN labels must not exceed 63 characters'
+        case $domain_label in
+            [a-z0-9] | [a-z0-9]*[a-z0-9]) ;;
+            *) die 'DNS_REBIND_DOMAIN labels must start and end with a letter or digit' ;;
+        esac
+        [ -n "$remaining_labels" ] || break
+    done
+    export DNS_REBIND_DOMAIN
+}
+
 dns_over_https_install() {
     attempt=0
     while [ "$attempt" -lt 5 ]; do
@@ -21,6 +71,15 @@ dns_over_https_stage() {
     # so neither package defaults nor previously configured instances survive.
     : >"$candidate_dir/https-dns-proxy"
     apply_overlay "$candidate_dir" "$overlay_file"
+    if [ -n "${DNS_REBIND_DOMAIN:-}" ]; then
+        uci -q -c "$candidate_dir" del_list \
+            "dhcp.dnsmasq.rebind_domain=$DNS_REBIND_DOMAIN" 2>/dev/null || :
+        uci -q -c "$candidate_dir" add_list \
+            "dhcp.dnsmasq.rebind_domain=$DNS_REBIND_DOMAIN" ||
+            die 'failed to add DNS_REBIND_DOMAIN to the dnsmasq candidate'
+        uci -q -c "$candidate_dir" commit dhcp ||
+            die 'failed to serialize dhcp candidate'
+    fi
 }
 
 dns_over_https_validate() {
@@ -61,6 +120,24 @@ dns_over_https_validate() {
     done
     [ "$(uci_get "$candidate_dir" dhcp.dnsmasq.noresolv)" = 1 ] || die 'dnsmasq must ignore resolv.conf'
     [ "$(uci_get "$candidate_dir" dhcp.dnsmasq.cachesize)" = 8192 ] || die 'dnsmasq cache must contain 8192 entries'
+    [ "$(uci_get "$candidate_dir" dhcp.dnsmasq.rebind_protection)" = 1 ] ||
+        die 'dnsmasq rebind protection must remain enabled'
+    if [ -n "${DNS_REBIND_DOMAIN:-}" ]; then
+        rebind_domains=$(uci_get "$candidate_dir" dhcp.dnsmasq.rebind_domain || :)
+        rebind_domain_count=$(
+            printf '%s\n' "$rebind_domains" |
+                awk -v expected="$DNS_REBIND_DOMAIN" '
+                    {
+                        for (field = 1; field <= NF; field++)
+                            if ($field == expected)
+                                count++
+                    }
+                    END { print count + 0 }
+                '
+        )
+        [ "$rebind_domain_count" = 1 ] ||
+            die 'DNS_REBIND_DOMAIN must appear exactly once in the dnsmasq candidate'
+    fi
     actual_forwards=$(uci_get "$candidate_dir" dhcp.dnsmasq.server) || die 'dnsmasq candidate lacks upstream servers'
     [ " $actual_forwards" = "$expected_forwards" ] ||
         die 'dnsmasq upstreams do not match the four https-dns-proxy instances'

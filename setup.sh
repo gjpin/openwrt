@@ -61,6 +61,8 @@ validate_repository() {
 
 validate_inputs() {
     CHANNEL=${CHANNEL:-52}
+    DNS_REBIND_DOMAIN=${DNS_REBIND_DOMAIN:-}
+    dns_over_https_preflight
     for variable_name in \
         PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
         VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY; do
@@ -103,10 +105,13 @@ validate_inputs() {
 
 # Validate the entire public environment contract before the first router
 # mutation. Error messages intentionally name variables but never print values.
-validate_inputs
 validate_repository
+# Load the shared DNS input validator before any router mutation.
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/modules/dns-over-https.sh"
+validate_inputs
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
-export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL
+export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL DNS_REBIND_DOMAIN
 
 # Reject unsupported or ambiguous stock configuration before package
 # installation or init-service enablement performs the first router mutation.
@@ -118,8 +123,6 @@ export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL
 . "$SCRIPT_DIR/modules/base-packages.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/modules/nts.sh"
-# shellcheck source=/dev/null
-. "$SCRIPT_DIR/modules/dns-over-https.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/modules/adblock-fast.sh"
 # shellcheck source=/dev/null

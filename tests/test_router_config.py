@@ -373,6 +373,7 @@ exit 0
         "VPN_KEY": "private-secret",
         "VPN_ADDR": "10.10.0.1/24",
     }
+    env.pop("DNS_REBIND_DOMAIN", None)
     try:
         yield tmp_path, config, backups, overlays, env
     finally:
@@ -821,6 +822,133 @@ def test_prepare_rejects_invalid_channel(router):
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert result.returncode != 0
     assert "CHANNEL must be an integer from 36 through 177" in result.stderr
+
+
+@pytest.mark.parametrize("configured_value", [None, ""])
+def test_rebind_domain_unset_or_empty_preserves_existing_exceptions(
+    router, configured_value
+):
+    _, config, backups, _, env = router
+    dhcp = json.loads((config / "dhcp").read_text())
+    dhcp["dnsmasq"]["rebind_domain"] = ["existing.example", "other.example"]
+    (config / "dhcp").write_text(json.dumps(dhcp))
+    if configured_value is None:
+        env.pop("DNS_REBIND_DOMAIN", None)
+    else:
+        env["DNS_REBIND_DOMAIN"] = configured_value
+
+    _, transaction = prepare(env)
+    candidate = json.loads((backups / transaction / "candidate" / "dhcp").read_text())
+    assert candidate["dnsmasq"]["rebind_domain"] == [
+        "existing.example", "other.example",
+    ]
+    assert candidate["dnsmasq"]["rebind_protection"] == "1"
+
+
+def test_rebind_domain_is_normalized_deduplicated_and_idempotent(router):
+    _, config, backups, _, env = router
+    dhcp = json.loads((config / "dhcp").read_text())
+    dhcp["dnsmasq"]["rebind_domain"] = [
+        "existing.example", "mydomain.com", "mydomain.com",
+    ]
+    (config / "dhcp").write_text(json.dumps(dhcp))
+    env["DNS_REBIND_DOMAIN"] = "MyDomain.COM"
+
+    _, first = prepare(env)
+    first_candidate = json.loads(
+        (backups / first / "candidate" / "dhcp").read_text()
+    )
+    assert first_candidate["dnsmasq"]["rebind_domain"] == [
+        "existing.example", "mydomain.com",
+    ]
+
+    (config / "dhcp").write_text(
+        (backups / first / "candidate" / "dhcp").read_text()
+    )
+    _, second = prepare(env)
+    second_candidate = json.loads(
+        (backups / second / "candidate" / "dhcp").read_text()
+    )
+    assert second_candidate["dnsmasq"]["rebind_domain"] == [
+        "existing.example", "mydomain.com",
+    ]
+
+
+def test_changing_rebind_domain_is_additive(router):
+    _, config, backups, _, env = router
+    env["DNS_REBIND_DOMAIN"] = "first.example"
+    _, first = prepare(env)
+    (config / "dhcp").write_text(
+        (backups / first / "candidate" / "dhcp").read_text()
+    )
+
+    env["DNS_REBIND_DOMAIN"] = "second.example"
+    _, second = prepare(env)
+    candidate = json.loads((backups / second / "candidate" / "dhcp").read_text())
+    assert candidate["dnsmasq"]["rebind_domain"] == [
+        "first.example", "second.example",
+    ]
+
+
+@pytest.mark.parametrize("domain", [
+    "*.mydomain.com",
+    "https://mydomain.com",
+    "my domain.com",
+    "bad_label.example",
+    "-bad.example",
+    "bad-.example",
+    "bad..example",
+    "localhost",
+    f"{'a' * 64}.example",
+    ".".join(["a" * 63] * 4),
+])
+def test_invalid_rebind_domain_is_rejected_before_backup(router, domain):
+    _, _, backups, _, env = router
+    env["DNS_REBIND_DOMAIN"] = domain
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert "DNS_REBIND_DOMAIN" in result.stderr
+    assert not backups.exists()
+
+
+def test_setup_rejects_invalid_rebind_domain_before_mutation(router):
+    root, _, _, _, env = router
+    marker = root / "mutation-attempted"
+    write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{marker}'\n")
+    env.update({
+        "VPN_KEY": "A" * 43 + "=",
+        "DNS_REBIND_DOMAIN": "*.mydomain.com",
+    })
+    result = subprocess.run(
+        [str(REPO / "setup.sh"), "--recovery-ready"],
+        env=env, text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "DNS_REBIND_DOMAIN" in result.stderr
+    assert not marker.exists()
+
+
+def test_rebind_domain_candidate_validation_requires_exactly_one(router):
+    _, _, backups, _, env = router
+    env["DNS_REBIND_DOMAIN"] = "mydomain.com"
+    _, transaction = prepare(env)
+    candidate_dir = backups / transaction / "candidate"
+    dhcp_path = candidate_dir / "dhcp"
+    dhcp = json.loads(dhcp_path.read_text())
+    dhcp["dnsmasq"]["rebind_domain"].append("mydomain.com")
+    dhcp_path.write_text(json.dumps(dhcp))
+    command = (
+        'die() { printf "%s\\n" "$*" >&2; exit 1; }; '
+        'uci_get() { uci -q -c "$1" get "$2"; }; '
+        f'. "{REPO / "modules" / "dns-over-https.sh"}"; '
+        f'dns_over_https_validate "{candidate_dir}"'
+    )
+    result = subprocess.run(
+        ["sh", "-eu", "-c", command],
+        env=env, text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "must appear exactly once" in result.stderr
 
 
 def test_setup_rejects_invalid_channel_before_mutation(router):

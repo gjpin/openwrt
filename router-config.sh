@@ -203,6 +203,7 @@ preflight_base() {
 
 preflight() {
     require_commands
+    dns_over_https_preflight
     preflight_base
     for config_name in https-dns-proxy adblock-fast; do
         [ -s "$CONFIG_DIR/$config_name" ] || die "missing or empty $CONFIG_DIR/$config_name"

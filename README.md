@@ -76,6 +76,8 @@ must run on the target router as `root`; do not run it on a workstation.
    export COUNTRY='XX'
    # Optional: 5 GHz channel (default 52, DFS). Width is always HE80.
    # export CHANNEL='52'
+   # Optional: permit private DNS answers for this apex and its subdomains.
+   # export DNS_REBIND_DOMAIN='mydomain.com'
    export VPN_IF='wgserver'
    export VPN_PORT='42451'
    export VPN_KEY="$(wg genkey)"
