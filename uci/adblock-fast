@@ -58,12 +58,6 @@ set adblock-fast.nextdns_apple.url='https://raw.githubusercontent.com/nextdns/na
 set adblock-fast.nextdns_apple.action='block'
 set adblock-fast.nextdns_apple.enabled='1'
 
-set adblock-fast.easylist='file_url'
-set adblock-fast.easylist.name='EasyList'
-set adblock-fast.easylist.url='https://easylist.to/easylist/easylist.txt'
-set adblock-fast.easylist.action='block'
-set adblock-fast.easylist.enabled='1'
-
 set adblock-fast.hagezi_dns_bypass='file_url'
 set adblock-fast.hagezi_dns_bypass.name='HaGeZi - Prevent DNS bypass'
 set adblock-fast.hagezi_dns_bypass.url='https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/doh-vpn-proxy-bypass.txt'

@@ -528,10 +528,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     )
     sources = {name: section for name, section in adblock.items() if section[".type"] == "file_url"}
     assert "unmanaged" not in adblock
-    assert len(sources) == 19
+    assert len(sources) == 18
     assert {section["name"] for section in sources.values()} == {
         "HaGeZi - Multi PRO", "OISD", "Steven Black", "Peter Lowe",
-        "NextDNS - Windows", "NextDNS - Samsung", "NextDNS - Apple", "EasyList",
+        "NextDNS - Windows", "NextDNS - Samsung", "NextDNS - Apple",
         "HaGeZi - Prevent DNS bypass", "Smart TV", "HaGeZi - LG webOS",
         "Smart TV blocklist", "Perflyst - Android tracking", "Divested - LG",
         "Divested - Mobile", "GameIndustry - Gaming hosts", "AdGuard CNAME trackers",
