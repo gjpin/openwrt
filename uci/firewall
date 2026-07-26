@@ -6,7 +6,7 @@ set firewall.pixel.name='pixel'
 add_list firewall.pixel.network='pixel'
 set firewall.pixel.input='ACCEPT'
 set firewall.pixel.output='ACCEPT'
-set firewall.pixel.forward='REJECT'
+set firewall.pixel.forward='ACCEPT'
 
 delete firewall.pixelguest
 set firewall.pixelguest='zone'

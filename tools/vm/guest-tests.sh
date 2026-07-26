@@ -551,7 +551,11 @@ for net in pixel pixelguest pixeliot pixelthings; do
     uci -q get "firewall.reject_dot_$net.src" | grep -qx "$net" || fail "missing DoT rejection for $net"
     uci -q get "firewall.reject_doq_$net.src" | grep -qx "$net" || fail "missing DoQ rejection for $net"
 done
+uci -q get firewall.pixel.forward | grep -qx ACCEPT ||
+    fail 'Pixel zone does not accept intra-zone forwarding'
 for net in pixelguest pixelthings pixeliot; do
+    uci -q get "firewall.$net.forward" | grep -qx REJECT ||
+        fail "$net zone does not reject intra-zone forwarding"
     rule="firewall.reject_isp_transit_$net"
     [ "$(uci -q get "$rule")" = rule ] || fail "missing ISP transit rejection for $net"
     [ "$(uci -q get "$rule.src")" = "$net" ] || fail "invalid ISP transit rejection source for $net"

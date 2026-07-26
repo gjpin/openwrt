@@ -10,6 +10,11 @@ This module installs WireGuard tools and LuCI protocol support, then creates:
 - A WAN firewall rule allowing the configured UDP port.
 - Membership of the server interface in the trusted `pixel` firewall zone.
 
+The Pixel zone accepts intra-zone forwarding, so physical Pixel clients and
+WireGuard peers are mutually trusted and can route to each other. WireGuard
+peers can also route peer-to-peer when their allowed IPs are configured
+accordingly.
+
 The server private key (`VPN_KEY`) is injected directly into the mode-0600
 candidate. The rendered overlay is checked for unresolved placeholders before
 installation.

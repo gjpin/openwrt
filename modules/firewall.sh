@@ -181,7 +181,11 @@ firewall_module_validate() {
         [ "$(uci_get "$candidate_dir" "firewall.reject_doq_$section_name.src")" = "$section_name" ] ||
             die "missing DoQ rejection for $section_name"
     done
+    [ "$(uci_get "$candidate_dir" firewall.pixel.forward)" = ACCEPT ] ||
+        die 'Pixel zone must accept intra-zone forwarding'
     for section_name in pixelguest pixelthings pixeliot; do
+        [ "$(uci_get "$candidate_dir" "firewall.$section_name.forward")" = REJECT ] ||
+            die "$section_name zone must reject intra-zone forwarding"
         transit_rule="reject_isp_transit_$section_name"
         [ "$(uci_get "$candidate_dir" "firewall.$transit_rule")" = rule ] ||
             die "missing ISP transit rejection for $section_name"

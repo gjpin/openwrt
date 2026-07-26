@@ -24,6 +24,14 @@ and 68. IoT also rejects general zone output, with a narrow UDP 67-to-68
 exception so the router can return DHCPv4 offers and acknowledgements; the
 other three zones accept output.
 
+The Pixel zone accepts intra-zone forwarding. Because the physical Pixel
+network and the WireGuard server interface are members of that same zone,
+physical Pixel clients and WireGuard peers can route to each other, and
+WireGuard peers can route to other peers when their allowed IPs are configured
+accordingly. They are a single mutual-trust domain. Physical Pixel clients also
+retain unrestricted Layer-2 communication because Wi-Fi client isolation is
+disabled on Pixel.
+
 Zone input policy alone is not enough for LuCI/SSH. Stock uhttpd and Dropbear
 listen on all addresses, including restricted-VLAN gateways. The
 [admin access](admin-access.md) module binds those listeners to Pixel

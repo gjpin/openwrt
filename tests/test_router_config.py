@@ -437,6 +437,9 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
     assert firewall["defaults"]["flow_offloading"] == "1"
     assert firewall["defaults"]["flow_offloading_hw"] == "1"
+    assert firewall["pixel"]["forward"] == "ACCEPT"
+    for restricted_zone in ("pixelguest", "pixeliot", "pixelthings"):
+        assert firewall[restricted_zone]["forward"] == "REJECT"
     assert firewall["pixeliot_dhcp_reply"] == {
         ".type": "rule", "name": "PixelIoT-DHCP-Reply", "dest": "pixeliot",
         "src_port": "67", "dest_port": "68", "proto": "udp",
@@ -1483,6 +1486,38 @@ def test_https_dns_proxy_validation_and_forward_mismatch_are_preapply_failures(r
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert "dnsmasq upstreams do not match" in result.stderr
     assert (config / "network").read_text() == original
+
+
+@pytest.mark.parametrize(("mutation", "error"), [
+    (
+        "set firewall.pixel.forward='REJECT'",
+        "Pixel zone must accept intra-zone forwarding",
+    ),
+    (
+        "set firewall.pixelguest.forward='ACCEPT'",
+        "pixelguest zone must reject intra-zone forwarding",
+    ),
+    (
+        "set firewall.pixeliot.forward='ACCEPT'",
+        "pixeliot zone must reject intra-zone forwarding",
+    ),
+    (
+        "set firewall.pixelthings.forward='ACCEPT'",
+        "pixelthings zone must reject intra-zone forwarding",
+    ),
+])
+def test_managed_zone_forward_validation_is_a_preapply_failure(
+    router, mutation, error
+):
+    _, config, backups, overlays, env = router
+    original = (config / "firewall").read_text()
+    with (overlays / "firewall").open("a") as stream:
+        stream.write(f"\n{mutation}\n")
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert error in result.stderr
+    assert (config / "firewall").read_text() == original
+    assert not any(backups.glob("*/state"))
 
 
 @pytest.mark.parametrize(("mutation", "error"), [
