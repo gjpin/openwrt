@@ -253,7 +253,7 @@ uci commit dhcp
 : >/etc/config/firewall
 uci -q batch <<'EOF'
 add firewall defaults
-set firewall.@defaults[-1].synflood_protect='1'
+set firewall.@defaults[-1].syn_flood='1'
 set firewall.@defaults[-1].input='REJECT'
 set firewall.@defaults[-1].output='ACCEPT'
 set firewall.@defaults[-1].forward='REJECT'

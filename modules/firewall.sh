@@ -46,7 +46,9 @@ firewall_classify_base() {
     done
     [ "$firewall_defaults_count" = 1 ] || die 'firewall must contain exactly one defaults section'
     firewall_check_allowed_options "$firewall_config_dir" "$FIREWALL_DEFAULTS_SECTION" \
-        'synflood_protect syn_flood input output forward flow_offloading flow_offloading_hw'
+        'syn_flood input output forward flow_offloading flow_offloading_hw'
+    [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_DEFAULTS_SECTION.syn_flood")" = 1 ] ||
+        die 'stock firewall defaults lack synflood protection'
     [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_DEFAULTS_SECTION.input")" = REJECT ] ||
         die 'stock firewall defaults input policy was customized'
     [ "$(uci_get "$firewall_config_dir" "firewall.$FIREWALL_DEFAULTS_SECTION.output")" = ACCEPT ] ||
@@ -129,8 +131,6 @@ firewall_module_preflight() {
     firewall_classify_base "$CONFIG_DIR"
     if uci_get "$CONFIG_DIR" network.lan >/dev/null 2>&1; then
         [ -n "$FIREWALL_LAN_SECTION" ] || die 'stock network.lan requires a LAN firewall zone and forwarding'
-        firewall_synflood=$(uci_get "$CONFIG_DIR" "firewall.$FIREWALL_DEFAULTS_SECTION.synflood_protect" 2>/dev/null || :)
-        [ "$firewall_synflood" = 1 ] || die 'stock firewall defaults lack synflood protection'
     else
         [ -z "$FIREWALL_LAN_SECTION" ] || die 'obsolete LAN firewall policy exists without network.lan'
     fi

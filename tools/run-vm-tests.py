@@ -249,6 +249,61 @@ def configure_uplink(console: SerialConsole) -> None:
     )
 
 
+def verify_stock_runtime(console: SerialConsole) -> None:
+    """Pin preflight assumptions to the untouched official release runtime."""
+    console.command(
+        "[ \"$(uci -q get network.lan.device)\" = br-lan ] && "
+        "[ \"$(uci -q get network.lan.proto)\" = static ] && "
+        "[ \"$(uci -q get network.lan.ipaddr)\" = 192.168.1.1/24 ] && "
+        "[ \"$(uci -q get network.lan.ip6assign)\" = 60 ]",
+        30,
+    )
+    console.command(
+        "[ \"$(uci -q get dhcp.lan.interface)\" = lan ] && "
+        "[ \"$(uci -q get dhcp.lan.start)\" = 100 ] && "
+        "[ \"$(uci -q get dhcp.lan.limit)\" = 150 ] && "
+        "[ \"$(uci -q get dhcp.lan.leasetime)\" = 12h ]",
+        30,
+    )
+    console.command(
+        "[ \"$(uci -q get dhcp.lan.dhcpv4)\" = server ] && "
+        "[ \"$(uci -q get dhcp.lan.dhcpv6)\" = server ] && "
+        "[ \"$(uci -q get dhcp.lan.ra)\" = server ] && "
+        "[ \"$(uci -q get dhcp.lan.ra_slaac)\" = 1 ] && "
+        "[ \"$(uci -q get dhcp.lan.ra_flags)\" = 'managed-config other-config' ] && "
+        "[ \"$(uci -q show dhcp | grep -c '=dnsmasq$')\" = 1 ]",
+        30,
+    )
+    console.command(
+        "[ \"$(uci -q get 'firewall.@defaults[0].syn_flood')\" = 1 ] && "
+        "[ \"$(uci -q get 'firewall.@defaults[0].input')\" = REJECT ] && "
+        "[ \"$(uci -q get 'firewall.@defaults[0].output')\" = ACCEPT ] && "
+        "[ \"$(uci -q get 'firewall.@defaults[0].forward')\" = REJECT ] && "
+        "[ \"$(uci -q get 'firewall.@zone[0].name')\" = lan ] && "
+        "[ \"$(uci -q get 'firewall.@zone[0].input')\" = ACCEPT ] && "
+        "[ \"$(uci -q get 'firewall.@zone[0].output')\" = ACCEPT ] && "
+        "[ \"$(uci -q get 'firewall.@zone[0].forward')\" = ACCEPT ]",
+        30,
+    )
+    console.command(
+        "[ \"$(uci -q get 'firewall.@zone[1].name')\" = wan ] && "
+        "[ \"$(uci -q get 'firewall.@zone[1].input')\" = REJECT ] && "
+        "[ \"$(uci -q get 'firewall.@zone[1].output')\" = ACCEPT ] && "
+        "[ \"$(uci -q get 'firewall.@zone[1].forward')\" = DROP ] && "
+        "[ \"$(uci -q get 'firewall.@zone[1].network')\" = 'wan wan6' ] && "
+        "[ \"$(uci -q get 'firewall.@forwarding[0].src')\" = lan ] && "
+        "[ \"$(uci -q get 'firewall.@forwarding[0].dest')\" = wan ]",
+        30,
+    )
+    console.command(
+        "[ \"$(uci -q get uhttpd.main)\" = uhttpd ] && "
+        "[ \"$(uci -q get dropbear.main)\" = dropbear ] && "
+        "[ \"$(uci -q get dropbear.main.enable)\" = 1 ] && "
+        "[ \"$(uci -q get dropbear.main.Port)\" = 22 ]",
+        30,
+    )
+
+
 def stop_process(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
@@ -323,6 +378,7 @@ def main() -> int:
         )
         console = SerialConsole(process, workdir / "serial-redacted.log")
         wait_for_boot(console)
+        verify_stock_runtime(console)
         configure_uplink(console)
         guest_url = f"http://{QEMU_ISP_GATEWAY}:{port}/repository.tar.gz"
         console.command(f"uclient-fetch '{guest_url}' -O /tmp/repository.tar.gz", 60)

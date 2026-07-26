@@ -469,3 +469,13 @@ def test_vm_passively_waits_for_boot_network_before_sending_commands():
     stock_wan = source.index("uci -q set network.wan=interface")
     assert ready < verify < remove_lan < stock_wan
     assert "network.uplink" not in source
+
+
+def test_vm_verifies_stock_runtime_before_reconfiguring_disk_root():
+    source = (REPO / "tools/run-vm-tests.py").read_text()
+    disk_boot = source.index(
+        'kernel = downloads["openwrt-25.12.4-armsr-armv8-generic-kernel.bin"]'
+    )
+    runtime_check = source.index("verify_stock_runtime(console)", disk_boot)
+    uplink_change = source.index("configure_uplink(console)", runtime_check)
+    assert disk_boot < runtime_check < uplink_change

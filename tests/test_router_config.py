@@ -204,7 +204,7 @@ def router():
         "unrelated": {".type": "interface", "proto": "none"},
     }
     firewall = {
-        "defaults": {".type": "defaults", "input": "REJECT", "output": "ACCEPT", "forward": "REJECT"},
+        "defaults": {".type": "defaults", "syn_flood": "1", "input": "REJECT", "output": "ACCEPT", "forward": "REJECT"},
         "wan": {".type": "zone", "name": "wan", "network": ["wan"], "input": "REJECT", "output": "ACCEPT", "forward": "DROP"},
         "unrelated": {".type": "rule", "name": "Keep me"},
     }
@@ -666,7 +666,7 @@ def test_fresh_stock_base_is_normalized_in_candidate_only(router):
     (config / "dhcp").write_text(json.dumps(dhcp))
     firewall = {
         "@defaults[0]": {
-            ".type": "defaults", "synflood_protect": "1", "input": "REJECT",
+            ".type": "defaults", "syn_flood": "1", "input": "REJECT",
             "output": "ACCEPT", "forward": "REJECT",
         },
         "@zone[0]": {
@@ -728,6 +728,17 @@ def test_custom_stock_base_is_rejected_before_backup(router):
     result = run_router(env, "check-base", check=False)
     assert result.returncode != 0
     assert "customized network membership" in result.stderr
+    assert not backups.exists()
+
+
+def test_missing_stock_synflood_protection_is_rejected_before_backup(router):
+    _, config, backups, _, env = router
+    firewall = json.loads((config / "firewall").read_text())
+    del firewall["defaults"]["syn_flood"]
+    (config / "firewall").write_text(json.dumps(firewall))
+    result = run_router(env, "check-base", check=False)
+    assert result.returncode != 0
+    assert "stock firewall defaults lack synflood protection" in result.stderr
     assert not backups.exists()
 
 
