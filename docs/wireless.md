@@ -27,12 +27,16 @@ mode-0600 transaction candidate and are never stored in the tracked overlay.
 both discovered `wifi-device` sections at prepare time. There is no default;
 setup fails if `COUNTRY` is unset or empty.
 
-`CHANNEL` selects the 5 GHz primary channel and defaults to `52` when unset.
-That channel is DFS (UNII-2A) in typical regulatory domains, so the radio runs
-a Channel Availability Check before beacons appear. Setup and prepare accept an
-integer from `36` through `177`. The module always sets the 5 GHz `htmode` to
-`HE80` (802.11ax 80 MHz per OpenWrt's `wifi-device` options). 2.4 GHz channel
-and `htmode` remain part of the router's base configuration.
+`CHANNEL` selects the 5 GHz primary channel and defaults to `36` when unset.
+Channel 36 is in the non-DFS UNII-1 block in typical regulatory domains, so the
+default `HE80` radio uses the 36–48 block without a DFS Channel Availability
+Check. The country code still controls whether the channel is available and
+what power and indoor/outdoor restrictions apply. Setup and prepare accept an
+integer from `36` through `177`; an explicit override can therefore select a
+DFS channel and should be chosen only when it is intentional and country-legal.
+The module always sets the 5 GHz `htmode` to `HE80` (802.11ax 80 MHz per
+OpenWrt's `wifi-device` options). 2.4 GHz channel and `htmode` remain part of
+the router's base configuration.
 
 The module requires exactly one existing `wifi-device` with `band '2g'` and one
 with `band '5g'`. It discovers their section names rather than assuming radio

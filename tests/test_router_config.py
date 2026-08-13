@@ -441,7 +441,7 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["pixeliot"]["isolate"] == "1"
     assert wireless["radio0"]["country"] == "US"
     assert wireless["radio1"]["country"] == "US"
-    assert wireless["radio0"]["channel"] == "52"
+    assert wireless["radio0"]["channel"] == "36"
     assert wireless["radio0"]["htmode"] == "HE80"
     assert wireless["radio1"].get("channel") == "auto"
     assert "htmode" not in wireless["radio1"]
@@ -852,7 +852,7 @@ def test_wireless_assignment_follows_bands_not_radio_numbers(router):
     assert candidate["pixelthings"]["device"] == "radio1"
     assert candidate["pixelguest"]["device"] == "radio1"
     assert candidate["pixeliot"]["device"] == "radio0"
-    assert candidate["radio1"]["channel"] == "52"
+    assert candidate["radio1"]["channel"] == "36"
     assert candidate["radio1"]["htmode"] == "HE80"
 
 

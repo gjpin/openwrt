@@ -18,7 +18,7 @@ wireless_module_validate_passwords() {
 wireless_module_preflight() {
     wireless_module_validate_passwords
     [ -n "${COUNTRY-}" ] || die 'required variable is empty: COUNTRY'
-    CHANNEL=${CHANNEL:-52}
+    CHANNEL=${CHANNEL:-36}
     case $CHANNEL in
         '' | *[!0-9]*) die 'CHANNEL must be an integer from 36 through 177' ;;
     esac

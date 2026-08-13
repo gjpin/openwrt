@@ -9,7 +9,7 @@ confirmed within five minutes.
 
 - Four WPA3 networks: Pixel, Guest, IoT, and Things
 - AP client isolation on Guest, IoT, and Things (`isolate=1`)
-- 5 GHz DFS on channel `52` at `HE80`
+- 5 GHz on non-DFS channel `36` at `HE80`
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
 - LuCI and SSH bound to the Pixel gateway only (`192.168.8.1` / `pixel`)
@@ -75,8 +75,9 @@ must run on the target router as `root`; do not run it on a workstation.
    export GUEST_WIFI_PASSWORD='replace-me'
    export IOT_WIFI_PASSWORD='replace-me'
    export COUNTRY='XX'
-   # Optional: 5 GHz channel (default 52, DFS). Width is always HE80.
-   # export CHANNEL='52'
+   # Optional: override the 5 GHz primary channel (default 36, non-DFS).
+   # Width is always HE80; use only a country-legal channel.
+   # export CHANNEL='36'
    # Optional: permit private DNS answers for this apex and its subdomains.
    # export DNS_REBIND_DOMAIN='mydomain.com'
    export VPN_IF='wgserver'

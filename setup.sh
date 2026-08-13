@@ -60,7 +60,7 @@ validate_repository() {
 }
 
 validate_inputs() {
-    CHANNEL=${CHANNEL:-52}
+    CHANNEL=${CHANNEL:-36}
     DNS_REBIND_DOMAIN=${DNS_REBIND_DOMAIN:-}
     dns_over_https_preflight
     for variable_name in \

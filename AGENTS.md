@@ -168,7 +168,7 @@ path over direct remote replacement of live config files.
   `GUEST_WIFI_PASSWORD`, `IOT_WIFI_PASSWORD`, `COUNTRY`, `VPN_IF`, `VPN_PORT`,
   `VPN_KEY`, and `VPN_ADDR`. There is no `VPN_ADDR6`.
   `COUNTRY` is a required two-letter ISO code with no default. Optional
-  `CHANNEL` defaults to `52` (5 GHz DFS); the wireless module also forces
+  `CHANNEL` defaults to `36` (5 GHz non-DFS); the wireless module also forces
   5 GHz `htmode=HE80`.
 - Keep operations idempotent. Re-running prepare/apply must not append
   duplicate UCI rules, redirects, list entries, sections, or `modules.conf`
