@@ -53,6 +53,12 @@ set adblock-fast.nextdns_samsung.url='https://raw.githubusercontent.com/nextdns/
 set adblock-fast.nextdns_samsung.action='block'
 set adblock-fast.nextdns_samsung.enabled='1'
 
+set adblock-fast.hagezi_native_samsung='file_url'
+set adblock-fast.hagezi_native_samsung.name='HaGeZi - Samsung native tracking'
+set adblock-fast.hagezi_native_samsung.url='https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/native.samsung.txt'
+set adblock-fast.hagezi_native_samsung.action='block'
+set adblock-fast.hagezi_native_samsung.enabled='1'
+
 set adblock-fast.nextdns_apple='file_url'
 set adblock-fast.nextdns_apple.name='NextDNS - Apple'
 set adblock-fast.nextdns_apple.url='https://raw.githubusercontent.com/nextdns/native-tracking-domains/refs/heads/main/domains/apple'
@@ -82,6 +88,12 @@ set adblock-fast.smart_tv.name='Smart TV blocklist'
 set adblock-fast.smart_tv.url='https://perflyst.github.io/PiHoleBlocklist/SmartTV.txt'
 set adblock-fast.smart_tv.action='block'
 set adblock-fast.smart_tv.enabled='1'
+
+set adblock-fast.blocklistproject_smart_tv='file_url'
+set adblock-fast.blocklistproject_smart_tv.name='Block List Project - Smart TV'
+set adblock-fast.blocklistproject_smart_tv.url='https://blocklistproject.github.io/Lists/smart-tv.txt'
+set adblock-fast.blocklistproject_smart_tv.action='block'
+set adblock-fast.blocklistproject_smart_tv.enabled='1'
 
 set adblock-fast.perflyst_android='file_url'
 set adblock-fast.perflyst_android.name='Perflyst - Android tracking'

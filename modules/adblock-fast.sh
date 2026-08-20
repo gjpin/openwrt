@@ -77,12 +77,13 @@ adblock_fast_validate() {
         die 'adblock-fast candidate contains duplicate automatic list updates'
     file_url_count=$(uci -q -c "$candidate_dir" show adblock-fast |
         grep -Ec "=('file_url'|file_url)\$") || :
-    [ "$file_url_count" = 18 ] ||
-        die 'adblock-fast candidate must contain exactly 18 sources'
+    [ "$file_url_count" = 20 ] ||
+        die 'adblock-fast candidate must contain exactly 20 sources'
     for section_name in \
         hagezi_multi_pro oisd steven_black peter_lowe \
-        nextdns_windows nextdns_samsung nextdns_apple \
+        nextdns_windows nextdns_samsung hagezi_native_samsung nextdns_apple \
         hagezi_dns_bypass smart_tv_agh hagezi_lg_webos smart_tv \
+        blocklistproject_smart_tv \
         perflyst_android divested_lg divested_mobile gameindustry_gaming \
         adguard_cname_trackers cert_polska adguard; do
         [ "$(uci_get "$candidate_dir" "adblock-fast.$section_name")" = file_url ] ||

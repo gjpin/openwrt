@@ -547,18 +547,26 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     )
     sources = {name: section for name, section in adblock.items() if section[".type"] == "file_url"}
     assert "unmanaged" not in adblock
-    assert len(sources) == 18
+    assert len(sources) == 20
     assert {section["name"] for section in sources.values()} == {
         "HaGeZi - Multi PRO", "OISD", "Steven Black", "Peter Lowe",
         "NextDNS - Windows", "NextDNS - Samsung", "NextDNS - Apple",
-        "HaGeZi - Prevent DNS bypass", "Smart TV", "HaGeZi - LG webOS",
-        "Smart TV blocklist", "Perflyst - Android tracking", "Divested - LG",
-        "Divested - Mobile", "GameIndustry - Gaming hosts", "AdGuard CNAME trackers",
-        "CERT Polska", "AdGuard",
+        "HaGeZi - Samsung native tracking", "HaGeZi - Prevent DNS bypass",
+        "Smart TV", "HaGeZi - LG webOS", "Smart TV blocklist",
+        "Block List Project - Smart TV", "Perflyst - Android tracking",
+        "Divested - LG", "Divested - Mobile", "GameIndustry - Gaming hosts",
+        "AdGuard CNAME trackers", "CERT Polska", "AdGuard",
     }
     assert all(section["action"] == "block" and section["enabled"] == "1" for section in sources.values())
     assert sources["peter_lowe"]["url"].endswith("&mimetype=plaintext")
     assert "/adblock/doh-vpn-proxy-bypass.txt" in sources["hagezi_dns_bypass"]["url"]
+    assert sources["hagezi_native_samsung"]["url"] == (
+        "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/"
+        "adblock/native.samsung.txt"
+    )
+    assert sources["blocklistproject_smart_tv"]["url"] == (
+        "https://blocklistproject.github.io/Lists/smart-tv.txt"
+    )
     manifest = (transaction_dir / "manifest.sha256").read_text()
     assert "backup/https-dns-proxy" in manifest
     assert "candidate/https-dns-proxy" in manifest
