@@ -28,8 +28,9 @@ in load-balancing mode:
 
 Bootstrap DNS uses `9.9.9.11`, `1.1.1.1`, and `8.8.8.8`. AdGuard does not
 provide incoming DoH, DoT, DoQ, or DNSCrypt. Existing firewall redirects force
-all managed VLAN TCP/UDP port-53 traffic to the router. Direct DoT on TCP/UDP
-853 and DoQ on UDP 8853 remain rejected.
+all managed VLAN TCP/UDP port-53 traffic to the router. Direct DoT and standard
+DoQ on TCP/UDP 853, plus alternate/legacy DoQ on UDP 784 and 8853, are rejected
+to every routed destination rather than only to WAN.
 
 AdGuard DNS, AdAway Default Blocklist, and HaGeZi DNS Rebind Protection are
 enabled. The 19 non-duplicate adblock-fast sources are also enabled with fixed
@@ -80,7 +81,8 @@ rejects an already-configured router. Perform this only with an off-router
    `/usr/bin/AdGuardHome --check-config --config STAGED_YAML --no-check-update`.
 5. Build staged UCI copies—not live edits—with dnsmasq port 54, cache 0,
    `noresolv=1`, no `server` entries, `.lan` local service, per-VLAN DHCP option
-   6, the four port-53 redirects, DoT/DoQ rejects, and port-54 bypass rejects.
+   6, the four port-53 redirects, destination-independent DoT/DoQ rejects, and
+   port-54 bypass rejects.
    Configure `/etc/config/adguardhome` for the standard YAML path and
    `/opt/adguardhome` work directory. Run `fw4 check` against the candidate.
 6. Create a local five-minute rollback job before cutover. It must stop AdGuard,
