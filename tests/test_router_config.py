@@ -510,8 +510,10 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     }
     adguard_yaml = (transaction_dir / "candidate" / "adguardhome.yaml").read_text()
     assert "  address: 192.168.8.1:3000\n" in adguard_yaml
+    assert "  - 10.10.0.1\n" in adguard_yaml
     assert "  - 192.168.11.1\n" in adguard_yaml
     assert "  port: 53\n" in adguard_yaml
+    assert "  blocking_mode: nxdomain\n" in adguard_yaml
     assert "  - '[/lan/]127.0.0.1:54'\n" in adguard_yaml
     for upstream in (
         "https://dns.quad9.net/dns-query",
@@ -771,6 +773,15 @@ def test_fresh_stock_base_is_normalized_in_candidate_only(router):
             "masq": "1", "mtu_fix": "1",
         },
         "@forwarding[0]": {".type": "forwarding", "src": "lan", "dest": "wan"},
+        "@rule[0]": {
+            ".type": "rule", "name": "Allow-IPSec-ESP", "src": "wan",
+            "dest": "lan", "proto": "esp", "target": "ACCEPT",
+        },
+        "@rule[1]": {
+            ".type": "rule", "name": "Allow-ISAKMP", "src": "wan",
+            "dest": "lan", "dest_port": "500", "proto": "udp",
+            "target": "ACCEPT",
+        },
         "unrelated": {".type": "rule", "name": "Keep me"},
     }
     (config / "firewall").write_text(json.dumps(firewall))
@@ -790,6 +801,10 @@ def test_fresh_stock_base_is_normalized_in_candidate_only(router):
     assert candidate_firewall["defaults"]["flow_offloading_hw"] == "1"
     assert candidate_firewall["wan"]["network"] == ["wan"]
     assert "base_lan" not in candidate_firewall and "base_lan_wan" not in candidate_firewall
+    assert not any(
+        section.get("name") in {"Allow-IPSec-ESP", "Allow-ISAKMP"}
+        for section in candidate_firewall.values()
+    )
     assert candidate_firewall["unrelated"]["name"] == "Keep me"
     assert {name: (config / name).read_text() for name in originals} == originals
     modules_conf = (backups / transaction / "candidate" / "modules.conf").read_text()
@@ -894,6 +909,31 @@ def test_prepare_rejects_invalid_channel(router):
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert result.returncode != 0
     assert "CHANNEL must be an integer from 36 through 177" in result.stderr
+
+
+@pytest.mark.parametrize("vpn_addr", [
+    "10.10.0.1",
+    "10.10.0.1/33",
+    "10.10.0.256/24",
+    "10.10.0/24",
+    "10.10.0.1/24/extra",
+])
+def test_prepare_rejects_invalid_wireguard_dns_bind_address(router, vpn_addr):
+    _, _, backups, _, env = router
+    env["VPN_ADDR"] = vpn_addr
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert "VPN_ADDR" in result.stderr
+    assert not backups.exists()
+
+
+def test_wireguard_dns_bind_address_is_derived_from_vpn_addr(router):
+    _, _, backups, _, env = router
+    env["VPN_ADDR"] = "10.77.6.1/27"
+    _, transaction = prepare(env)
+    yaml = (backups / transaction / "candidate" / "adguardhome.yaml").read_text()
+    assert yaml.count("  - 10.77.6.1\n") == 1
+    assert "10.77.6.1/27" not in yaml
 
 
 @pytest.mark.parametrize("configured_value", [None, ""])

@@ -124,6 +124,10 @@ over direct remote replacement of live config files.
 - Fresh setup creates the IPv4 WireGuard server with no client peers. Add a
   peer separately before testing a handshake or client routing; do not restore
   an installer-managed default peer.
+- AdGuard Home must bind TCP/UDP port 53 to the IPv4 host address derived from
+  `VPN_ADDR`, in addition to loopback and all managed VLAN gateways. WireGuard
+  peers share the Pixel zone's DNS interception and port-54 rejection policy;
+  acceptance tests must exercise direct and intercepted DNS through a peer.
 - Overlays update an existing stock configuration. Checked-in `uci/network` has
   no loopback or globals sections and does not create `network.wan`; it pins
   WAN addressing on the stock section. Checked-in `uci/firewall` has no

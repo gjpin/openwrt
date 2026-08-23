@@ -15,7 +15,8 @@ confirmed within five minutes.
 - LuCI and SSH bound to the Pixel gateway only (`192.168.8.1` / `pixel`)
 - LuCI checks for attended sysupgrades when the Status Overview page loads
 - AdGuard Home as the primary DNS resolver, using encrypted upstreams and DNS
-  bypass controls (port-53 interception plus DoT/DoQ rejects)
+  bypass controls (port-53 interception plus DoT/DoQ rejects), including DNS
+  service and interception for WireGuard peers
 - Preferred authenticated NTP via `chrony-nts` (NTS), with unauthenticated
   NTP-by-IP cold-boot and outage fallback
 - DNS-based ad and tracker blocking with an authenticated Pixel-only dashboard
@@ -59,6 +60,9 @@ must run on the target router as `root`; do not run it on a workstation.
 8. Access 192.168.1.1 via 2 SSH: root@192.168.1.1
 9. Disable ISP wifi network: 2.4 GHz, 5 GHz, and Guest Wi-Fi
 10. Download script:
+   This convenience snippet pulls mutable `main`; there are no generated
+   release artifacts. For a reproducible deployment, instead download a
+   reviewed commit archive and verify its checksum before extracting it.
    ```sh
    set -eu
    archive="/tmp/openwrt-main.$$.tar.gz"
@@ -94,11 +98,20 @@ must run on the target router as `root`; do not run it on a workstation.
 12. Access 192.168.8.1 via 2 SSH: root@192.168.8.1
 13. Run `/usr/libexec/router-config confirm TRANSACTION_ID`
 14. Open the AdGuard Home dashboard at `http://192.168.8.1:3000` from Pixel.
-15. Run `reboot`
-16. Create WireGuard peers by running add-wireguard-peers.sh in Flint (MUST add the peers in the TODO section)
+15. Verify AdGuard listens on the host address from `VPN_ADDR` and returns
+    `NXDOMAIN` for blocked responses.
+   ```sh
+   wg_dns_ip=${VPN_ADDR%/*}
+   ss -lntu | grep -F "$wg_dns_ip:53"
+   grep -Fqx '  blocking_mode: nxdomain' /etc/adguardhome/adguardhome.yaml
+   ```
+16. Run `reboot`
+17. Create WireGuard peers by running add-wireguard-peers.sh in Flint (MUST add the peers in the TODO section)
   - Get the wireguard configs from /root/wireguard-clients
   - Create a port forward in ISP router for wireguard
-17. Add Flint to ISP router DMZ
+  - From a peer, verify direct DNS to the host address from `VPN_ADDR`, forced
+    DNS to another address, and rejection of direct dnsmasq access on port 54.
+18. Add Flint to ISP router DMZ
 
 
 ## Development checks
@@ -141,7 +154,8 @@ package manifest, and discards all generated firmware. Nothing produced by the
 test harness is a deployment artifact.
 
 QEMU exercises OpenWrt userland, real UCI serialization, fw4, procd services,
-namespaced VLAN clients, DNS interception, WireGuard, idempotency, and rollback.
+namespaced VLAN clients, DNS interception, WireGuard DNS and interception,
+idempotency, and rollback.
 It cannot emulate the MT7986/MT7531 switch, MT7915 RF behavior, 2.5 GbE PHYs,
 bootloader, or eMMC recovery. Physical deployment therefore still requires an
 off-router backup, local Ethernet or serial recovery, and real port, Wi-Fi,

@@ -79,9 +79,16 @@ export_normalized_uci() {
 
 check_dns_listeners() {
     dns_phase=$1
+    wireguard_dns_ip=${VPN_ADDR%/*}
     if ! ss -lntu | grep -Eq '(^|[.:])53[[:space:]]'; then
         fail "$dns_phase: AdGuard Home DNS port 53 is not bound"
     fi
+    for dns_protocol in tcp udp; do
+        ss -lntu | awk -v protocol="$dns_protocol" -v endpoint="$wireguard_dns_ip:53" '
+            $1 == protocol && index($0, endpoint) { found = 1 }
+            END { exit !found }
+        ' || fail "$dns_phase: AdGuard Home $dns_protocol DNS is not bound to WireGuard"
+    done
     if ! ss -lntu | grep -Eq '(^|[.:])54[[:space:]]'; then
         fail "$dns_phase: dnsmasq local DNS port 54 is not bound"
     fi
@@ -479,6 +486,8 @@ run_and_confirm first
 check_ap_interfaces 'after first installation'
 export_normalized_uci >/tmp/first.export
 fw4 check || fail 'fw4 rejected installed configuration'
+! uci -q show firewall | grep -Eq "\.name='(Allow-IPSec-ESP|Allow-ISAKMP)'" ||
+    fail 'obsolete stock IPsec forwarding rules survived migration'
 [ "$(uci -q get network.lan || :)" = '' ] || fail 'stock LAN survived migration'
 [ "$(uci -q get network.wan6 || :)" = '' ] || fail 'wan6 survived migration'
 [ "$(uci -q get network.wan.proto)" = static ] || fail 'WAN was not pinned static'
@@ -510,6 +519,11 @@ done
     fail 'installed AdGuard Home configuration is invalid'
 grep -Fq -- '@@||vm.example^' /etc/adguardhome/adguardhome.yaml ||
     fail 'AdGuard Home DNS rebind exception is missing'
+grep -Eq "^[[:space:]]*-[[:space:]]*${VPN_ADDR%/*}[[:space:]]*$" \
+    /etc/adguardhome/adguardhome.yaml ||
+    fail 'AdGuard Home WireGuard DNS listener is missing'
+grep -Fqx '  blocking_mode: nxdomain' /etc/adguardhome/adguardhome.yaml ||
+    fail 'AdGuard Home blocking mode is not NXDOMAIN'
 enabled_filter_count=$(awk '
     /^filters:/ { in_filters = 1; next }
     /^whitelist_filters:/ { in_filters = 0 }
@@ -1167,7 +1181,7 @@ ip netns exec wanclient ip link add wgtest type wireguard
 printf '%s\n' "$client_private" >/tmp/client-private
 chmod 600 /tmp/client-private
 ip netns exec wanclient wg set wgtest private-key /tmp/client-private \
-    peer "$server_public" preshared-key /tmp/client-psk allowed-ips 10.10.0.1/32 \
+    peer "$server_public" preshared-key /tmp/client-psk allowed-ips 10.10.0.0/24 \
     endpoint 198.18.0.1:42451
 ip -n wanclient address add 10.10.0.2/24 dev wgtest
 ip -n wanclient link set wgtest up
@@ -1180,6 +1194,19 @@ ip netns exec wanclient ping -c 3 -W 3 10.10.0.1 >/dev/null || fail 'WireGuard t
 ip netns exec wanclient wg show wgtest latest-handshakes | grep -Eq '[1-9][0-9]{8,}' ||
     fail 'WireGuard did not record a handshake'
 fw4 print | grep -q 'Allow-WireGuard' || fail 'WAN WireGuard rule is absent from fw4 output'
+ip netns exec wanclient dig +short +time=2 +tries=2 \
+    @10.10.0.1 vm.lan A >/tmp/vm-test-wireguard-dns 2>&1 ||
+    fail 'WireGuard client could not query AdGuard Home directly'
+grep -qx 203.0.113.7 /tmp/vm-test-wireguard-dns ||
+    fail 'WireGuard direct DNS query returned an unexpected answer'
+ip netns exec wanclient dig +short +time=2 +tries=2 \
+    @10.10.0.99 vm.lan A >/tmp/vm-test-wireguard-hijack 2>&1 ||
+    fail 'WireGuard DNS interception did not answer a diverted query'
+grep -qx 203.0.113.7 /tmp/vm-test-wireguard-hijack ||
+    fail 'WireGuard diverted DNS query returned an unexpected answer'
+! ip netns exec wanclient dig +short +time=1 +tries=1 \
+    @10.10.0.1 -p 54 vm.lan A >/dev/null 2>&1 ||
+    fail 'WireGuard client bypassed AdGuard Home through dnsmasq port 54'
 
 # Exercise a real watchdog rollback and a missing-port preflight rejection.
 prepare_output=$(./router-config.sh prepare --recovery-ready)

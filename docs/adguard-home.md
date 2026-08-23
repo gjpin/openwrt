@@ -8,13 +8,15 @@ AdGuard Home dashboard is served with authentication at
 `http://192.168.8.1:3000` and binds only to the Pixel gateway. The LuCI package
 provides service integration; the full dashboard is served by AdGuard Home.
 
-AdGuard Home is the primary resolver on TCP/UDP port 53 and binds to loopback
-plus the four managed VLAN gateway addresses. Dnsmasq moves to port 54, has no
-public upstreams or cache, and remains responsible for DHCP, `.lan` names, and
-private PTR answers. AdGuard routes `.lan` and private reverse queries to
-`127.0.0.1:54`. Every DHCP pool explicitly advertises its own gateway as DNS.
-Firewall rules reject client access to dnsmasq port 54, including from Pixel,
-so it cannot bypass filtering.
+AdGuard Home is the primary resolver on TCP/UDP port 53 and binds to loopback,
+the four managed VLAN gateway addresses, and the IPv4 host address derived from
+`VPN_ADDR`. The WireGuard listener is rendered from the configured CIDR rather
+than hard-coded. Dnsmasq moves to port 54, has no public upstreams or cache, and
+remains responsible for DHCP, `.lan` names, and private PTR answers. AdGuard
+routes `.lan` and private reverse queries to `127.0.0.1:54`. Every DHCP pool
+explicitly advertises its own gateway as DNS. Firewall rules reject client
+access to dnsmasq port 54, including from Pixel and its WireGuard member, so it
+cannot bypass filtering.
 
 The four existing encrypted upstreams are configured directly in AdGuard Home
 in load-balancing mode:
@@ -35,6 +37,8 @@ IDs. The former direct AdGuard DNS URL is omitted because it duplicates the
 built-in AdGuard DNS filter. Filters refresh every 24 hours. When optional
 `DNS_REBIND_DOMAIN` is set, the rendered user rule `@@||DOMAIN^` permits private
 answers for that apex and its subdomains; the input is normalized to lowercase.
+Blocked responses use `NXDOMAIN`, including private answers rejected by the
+HaGeZi DNS Rebind Protection filter, instead of returning `0.0.0.0` or `::`.
 
 Query logging is file-backed with a 5,000-entry memory buffer. Query-log and
 statistics intervals are both `7d`. Data is stored persistently in
@@ -85,10 +89,11 @@ rejects an already-configured router. Perform this only with an off-router
 7. Stop AdGuard and dnsmasq. Atomically install the staged UCI files and YAML,
    preserving YAML mode `0600` and ownership `adguardhome:adguardhome`. Reload
    network and firewall, start dnsmasq, then start AdGuard Home.
-8. From Pixel and every restricted VLAN, verify DHCP, ordinary DNS, local/PTR
-   resolution, forced DNS using an arbitrary external resolver address, DoT/
-   DoQ blocking, and the existing isolation/internet policy. Verify port 54 is
-   unreachable from clients and the dashboard is reachable only from Pixel.
+8. From Pixel, every restricted VLAN, and a WireGuard peer, verify DHCP where
+   applicable, ordinary DNS, local/PTR resolution, forced DNS using an arbitrary
+   resolver address, DoT/DoQ blocking, and the existing isolation/internet
+   policy. Verify port 54 is unreachable from clients, AdGuard owns TCP/UDP 53
+   on the host address from `VPN_ADDR`, and the dashboard binds only to Pixel.
 9. Enable AdGuard and cancel the rollback only after all checks pass. Keep the
    old packages installed but disabled until the router has operated normally
    through a reboot.

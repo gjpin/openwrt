@@ -6,6 +6,7 @@ adguard_home_inputs_preflight() {
     ADGUARD_USERNAME=${ADGUARD_USERNAME:-}
     ADGUARD_PASSWORD_HASH=${ADGUARD_PASSWORD_HASH:-}
     DNS_REBIND_DOMAIN=${DNS_REBIND_DOMAIN:-}
+    VPN_ADDR=${VPN_ADDR:-}
 
     [ -n "$ADGUARD_USERNAME" ] || die 'required variable is empty: ADGUARD_USERNAME'
     [ "${#ADGUARD_USERNAME}" -le 64 ] || die 'ADGUARD_USERNAME must not exceed 64 characters'
@@ -37,8 +38,37 @@ adguard_home_inputs_preflight() {
         [ "$adguard_bcrypt_cost" -le 31 ] 2>/dev/null ||
         die 'ADGUARD_PASSWORD_HASH bcrypt cost must be from 04 through 31'
 
+    case $VPN_ADDR in
+        *.*.*.*/*) : ;;
+        *) die 'VPN_ADDR must be an IPv4 CIDR address for the AdGuard Home listener' ;;
+    esac
+    case $VPN_ADDR in
+        *[!0-9./]* | */*/*) die 'VPN_ADDR must contain one IPv4 address and prefix length' ;;
+    esac
+    ADGUARD_WIREGUARD_BIND_HOST=${VPN_ADDR%/*}
+    wireguard_prefix=${VPN_ADDR##*/}
+    case $wireguard_prefix in
+        '' | *[!0-9]*) die 'VPN_ADDR prefix must be an integer from 0 through 32' ;;
+    esac
+    [ "$wireguard_prefix" -le 32 ] 2>/dev/null ||
+        die 'VPN_ADDR prefix must be an integer from 0 through 32'
+    old_ifs=$IFS
+    IFS=.
+    # Intentional field splitting validates the four IPv4 octets.
+    # shellcheck disable=SC2086
+    set -- $ADGUARD_WIREGUARD_BIND_HOST
+    IFS=$old_ifs
+    [ "$#" -eq 4 ] || die 'VPN_ADDR must contain exactly four IPv4 octets'
+    for wireguard_octet in "$@"; do
+        case $wireguard_octet in
+            '' | *[!0-9]*) die 'VPN_ADDR contains an invalid IPv4 octet' ;;
+        esac
+        [ "$wireguard_octet" -le 255 ] 2>/dev/null ||
+            die 'VPN_ADDR contains an IPv4 octet greater than 255'
+    done
+
     [ -n "$DNS_REBIND_DOMAIN" ] || {
-        export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH DNS_REBIND_DOMAIN
+        export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH DNS_REBIND_DOMAIN ADGUARD_WIREGUARD_BIND_HOST
         return 0
     }
     DNS_REBIND_DOMAIN=$(
@@ -77,7 +107,7 @@ adguard_home_inputs_preflight() {
         esac
         [ -n "$remaining_labels" ] || break
     done
-    export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH DNS_REBIND_DOMAIN
+    export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH DNS_REBIND_DOMAIN ADGUARD_WIREGUARD_BIND_HOST
 }
 
 adguard_home_install() {
@@ -102,7 +132,8 @@ adguard_home_render_config() {
     output_file=$1
     awk -v username="$ADGUARD_USERNAME" \
         -v password_hash="$ADGUARD_PASSWORD_HASH" \
-        -v rebind_domain="$DNS_REBIND_DOMAIN" '
+        -v rebind_domain="$DNS_REBIND_DOMAIN" \
+        -v wireguard_bind_host="$ADGUARD_WIREGUARD_BIND_HOST" '
         $0 == "@ADGUARD_USER@" {
             print "- name: \047" username "\047"
             print "  password: \047" password_hash "\047"
@@ -115,6 +146,10 @@ adguard_home_render_config() {
                 print "user_rules:"
                 print "- \047@@||" rebind_domain "^\047"
             }
+            next
+        }
+        $0 == "@WIREGUARD_BIND_HOST@" {
+            print "  - " wireguard_bind_host
             next
         }
         { print }
@@ -142,6 +177,7 @@ theme: auto
 dns:
   bind_hosts:
   - 127.0.0.1
+@WIREGUARD_BIND_HOST@
   - 192.168.8.1
   - 192.168.9.1
   - 192.168.10.1
@@ -208,7 +244,7 @@ filtering:
   protection_enabled: true
   filtering_enabled: true
   filters_update_interval: 24
-  blocking_mode: default
+  blocking_mode: nxdomain
   blocking_ipv4: ""
   blocking_ipv6: ""
   blocked_response_ttl: 10
@@ -424,6 +460,10 @@ adguard_home_validate() {
         die 'AdAway Default Blocklist is missing from AdGuard Home'
     [ "$(grep -Fxc -- '- enabled: true' "$config_file")" = 22 ] ||
         die 'AdGuard Home must contain exactly 22 enabled filters'
+    [ "$(grep -Fxc "  - $ADGUARD_WIREGUARD_BIND_HOST" "$config_file")" = 1 ] ||
+        die 'AdGuard Home must bind DNS to the WireGuard server address'
+    grep -Fqx '  blocking_mode: nxdomain' "$config_file" ||
+        die 'AdGuard Home must return NXDOMAIN for blocked responses'
     [ "$(grep -Fxc '  interval: 7d' "$config_file")" = 2 ] ||
         die 'AdGuard Home query log and statistics retention must both be seven days'
     adguard_binary=${ADGUARDHOME_BIN:-/usr/bin/AdGuardHome}

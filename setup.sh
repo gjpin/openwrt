@@ -111,7 +111,7 @@ validate_repository
 validate_inputs
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
 export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL DNS_REBIND_DOMAIN
-export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH
+export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH ADGUARD_WIREGUARD_BIND_HOST
 
 # Reject unsupported or ambiguous stock configuration before package
 # installation or init-service enablement performs the first router mutation.

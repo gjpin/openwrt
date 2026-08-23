@@ -46,6 +46,10 @@ offloading and is not managed or enforced by this module.
 The module identifies a unique stock defaults section, LAN and WAN zones, and
 LAN-to-WAN forwarding by content. Anonymous sections are named only in the
 candidate; the obsolete LAN policy is removed and `wan6` is removed from WAN.
+The stock `Allow-IPSec-ESP` and `Allow-ISAKMP` rules are also uniquely
+identified, named only in the candidate, and removed because their `dest=lan`
+target becomes invalid when the stock LAN zone is removed. Customized or
+ambiguous copies are rejected rather than guessed.
 The stock defaults are expected to use firewall4's `syn_flood=1` spelling, and
 the stock WAN zone is expected to use the `DROP` forward policy shipped by
 firewall4 in OpenWrt 25.12. Customized or ambiguous stock sections fail

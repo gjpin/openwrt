@@ -127,6 +127,43 @@ firewall_rename_role() {
     uci -q -c "$firewall_config_dir" commit firewall || die 'failed to serialize named firewall candidate'
 }
 
+firewall_name_obsolete_stock_rule() {
+    firewall_config_dir=$1
+    firewall_rule_name=$2
+    firewall_target=$3
+    firewall_expected_proto=$4
+    firewall_expected_dest_port=$5
+    firewall_match=
+    firewall_match_count=0
+
+    for firewall_section in $(firewall_sections_of_type "$firewall_config_dir" rule); do
+        [ "$(uci_get "$firewall_config_dir" "firewall.$firewall_section.name" 2>/dev/null || :)" = "$firewall_rule_name" ] ||
+            continue
+        firewall_match_count=$((firewall_match_count + 1))
+        firewall_match=$firewall_section
+    done
+    [ "$firewall_match_count" -le 1 ] ||
+        die "multiple stock firewall rules named $firewall_rule_name"
+    [ "$firewall_match_count" = 1 ] || return 0
+
+    firewall_allowed_options='name src dest proto target'
+    [ -z "$firewall_expected_dest_port" ] ||
+        firewall_allowed_options="$firewall_allowed_options dest_port"
+    firewall_check_allowed_options "$firewall_config_dir" "$firewall_match" "$firewall_allowed_options"
+    [ "$(uci_get "$firewall_config_dir" "firewall.$firewall_match.src" 2>/dev/null || :)" = wan ] &&
+        [ "$(uci_get "$firewall_config_dir" "firewall.$firewall_match.dest" 2>/dev/null || :)" = lan ] &&
+        [ "$(uci_get "$firewall_config_dir" "firewall.$firewall_match.proto" 2>/dev/null || :)" = "$firewall_expected_proto" ] &&
+        [ "$(uci_get "$firewall_config_dir" "firewall.$firewall_match.target" 2>/dev/null || :)" = ACCEPT ] &&
+        [ "$(uci_get "$firewall_config_dir" "firewall.$firewall_match.dest_port" 2>/dev/null || :)" = "$firewall_expected_dest_port" ] ||
+        die "stock firewall rule $firewall_rule_name was customized"
+
+    [ "$firewall_match" = "$firewall_target" ] ||
+        uci -q -c "$firewall_config_dir" rename "firewall.$firewall_match=$firewall_target" ||
+        die "failed to name stock firewall rule: $firewall_rule_name"
+    uci -q -c "$firewall_config_dir" commit firewall ||
+        die 'failed to serialize named stock firewall rule'
+}
+
 firewall_module_preflight() {
     firewall_classify_base "$CONFIG_DIR"
     if uci_get "$CONFIG_DIR" network.lan >/dev/null 2>&1; then
@@ -149,6 +186,14 @@ firewall_module_stage() {
         firewall_rename_role "$candidate_dir" LAN base_lan
         firewall_rename_role "$candidate_dir" LAN_WAN base_lan_wan
     fi
+    # Naming happens only in the candidate and each lookup is repeated after
+    # commit so anonymous UCI indices cannot shift underneath the next rule.
+    firewall_name_obsolete_stock_rule "$candidate_dir" Allow-IPSec-ESP \
+        base_allow_ipsec_esp esp ''
+    firewall_name_obsolete_stock_rule "$candidate_dir" Allow-ISAKMP \
+        base_allow_isakmp udp 500
+    uci -q -c "$candidate_dir" delete firewall.base_allow_ipsec_esp 2>/dev/null || :
+    uci -q -c "$candidate_dir" delete firewall.base_allow_isakmp 2>/dev/null || :
     uci -q -c "$candidate_dir" delete firewall.base_lan_wan 2>/dev/null || :
     uci -q -c "$candidate_dir" delete firewall.base_lan 2>/dev/null || :
     uci -q -c "$candidate_dir" del_list firewall.wan.network=wan6 2>/dev/null || :
@@ -172,6 +217,9 @@ firewall_module_validate() {
     [ "$(uci_get "$candidate_dir" firewall.wan.network)" = wan ] || die 'candidate WAN zone must contain only wan'
     ! uci -q -c "$candidate_dir" show firewall | grep -Eq "\.network='?wan6'?\$" ||
         die 'firewall still references an IPv6 WAN interface'
+    ! uci -q -c "$candidate_dir" show firewall | grep -Eq \
+        "\.name='?(Allow-IPSec-ESP|Allow-ISAKMP)'?\$" ||
+        die 'obsolete stock IPsec forwarding rules remain'
     for section_name in pixel pixelthings pixelguest pixeliot; do
         [ "$(uci_get "$candidate_dir" "firewall.$section_name")" = zone ] || die "missing firewall.$section_name"
         [ "$(uci_get "$candidate_dir" "firewall.divert_dns_$section_name.src")" = "$section_name" ] ||

@@ -163,6 +163,16 @@ def test_vm_guest_checks_adguard_listeners_across_rollback_phases():
     assert "ss -lntu" in helper
     assert "192\\.168\\.8\\.1:3000" in helper
     assert "192\\.168\\.(9|10|11)\\.1:3000" in helper
+    assert 'wireguard_dns_ip=${VPN_ADDR%/*}' in helper
+    assert 'AdGuard Home $dns_protocol DNS is not bound to WireGuard' in helper
+
+
+def test_vm_guest_exercises_wireguard_dns_and_hijacking():
+    source = (REPO / "tools/vm/guest-tests.sh").read_text()
+    assert "@10.10.0.1 vm.lan A" in source
+    assert "@10.10.0.99 vm.lan A" in source
+    assert "WireGuard DNS interception did not answer a diverted query" in source
+    assert "@10.10.0.1 -p 54 vm.lan A" in source
 
 
 def test_vm_guest_moves_wifi_phys_before_creating_namespaced_clients():
