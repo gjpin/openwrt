@@ -129,7 +129,7 @@ def test_vm_guest_reports_redacted_idempotence_diff_after_verbose_diagnostics():
     assert 'uci show "$package"' in export_body
     for secret_option in ("private_key", "preshared_key", "wireless\\.[^.]*\\.key"):
         assert secret_option in export_body
-    assert "adblock-fast\\.[^.]*\\.size" in export_body
+    assert "adguardhome" in export_body
     assert "occurrence[key]++" in export_body
     assert "sort" in export_body
 
@@ -153,15 +153,16 @@ def test_vm_guest_waits_for_apply_to_release_lock_before_confirming():
     assert "900" in helper
 
 
-def test_vm_guest_checks_doh_listeners_across_rollback_phases():
+def test_vm_guest_checks_adguard_listeners_across_rollback_phases():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
-    assert "check_doh_listeners 'before rollback'" in source
-    assert "check_doh_listeners 'after manual rollback'" in source
-    assert "check_doh_listeners 'after early-boot recovery'" in source
-    helper_start = source.index("check_doh_listeners() {")
+    assert "check_dns_listeners 'before rollback'" in source
+    assert "check_dns_listeners 'after manual rollback'" in source
+    assert "check_dns_listeners 'after early-boot recovery'" in source
+    helper_start = source.index("check_dns_listeners() {")
     helper = source[helper_start : source.index("\n}", helper_start)]
     assert "ss -lntu" in helper
-    assert "/proc/net/tcp /proc/net/udp" in helper
+    assert "192\\.168\\.8\\.1:3000" in helper
+    assert "192\\.168\\.(9|10|11)\\.1:3000" in helper
 
 
 def test_vm_guest_moves_wifi_phys_before_creating_namespaced_clients():
@@ -244,7 +245,7 @@ def test_vm_guest_waits_for_apk_on_non_overlapping_wan():
     assert "failed to install VM guest packages" in source
 
 
-def test_vm_guest_keeps_production_wan_for_second_setup_and_live_doh():
+def test_vm_guest_keeps_production_wan_for_second_setup_and_live_dns():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     first_setup = source.index("run_and_confirm first")
     wan_static = source.index(
@@ -252,7 +253,7 @@ def test_vm_guest_keeps_production_wan_for_second_setup_and_live_doh():
     )
     second_setup = source.index("run_and_confirm second", wan_static)
     live = source.index('if [ "$profile" = live ]; then', second_setup)
-    rollback = source.index("check_doh_listeners 'before rollback'", live)
+    rollback = source.index("check_dns_listeners 'before rollback'", live)
     assert first_setup < wan_static < second_setup < live < rollback
     assert "restore_qemu_wan_dhcp" not in source
     assert "10.0.2." not in source
@@ -330,35 +331,32 @@ def test_vm_guest_blocks_restricted_clients_from_isp_transit_before_wan_swap():
     assert "for client in guest things iot; do" in source
 
 
-def test_vm_guest_live_doh_waits_for_egress_and_retries_dig():
+def test_vm_guest_live_adguard_waits_for_egress_and_retries_dig():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     live_start = source.index('if [ "$profile" = live ]; then')
     live = source[live_start : source.index("\nfi\n", live_start)]
-    assert "check_doh_listeners 'before live DoH'" in live
-    assert "live DoH egress probe attempt" in live
+    assert "check_dns_listeners 'before live AdGuard Home checks'" in live
+    assert "live DNS egress probe attempt" in live
     assert "ping -c 1 -W 2 192.168.2.1" in live
     assert "uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/" in live
     assert "/etc/init.d/firewall reload" in live
-    assert "fail 'live DoH egress was not ready'" in live
-    assert "/etc/init.d/https-dns-proxy restart" in live
-    assert "check_doh_listeners 'after live DoH restart'" in live
-    assert 'while [ "$doh_attempt" -lt 8 ]; do' in live
-    assert "dig +time=5 +tries=1 @127.0.0.1 -p \"$port\" example.com A" in live
-    assert "--- dig output ---" in live
-    assert 'fail "live DoH query failed on $port"' in live
-    assert 'dig +time=10 +tries=1 @127.0.0.1 -p "$port" openwrt.org A' not in live
+    assert "fail 'live DNS egress was not ready'" in live
+    assert "/etc/init.d/adguardhome restart" in live
+    assert "check_dns_listeners 'after live AdGuard Home restart'" in live
+    assert 'while [ "$dns_attempt" -lt 12 ]; do' in live
+    assert "dig +time=5 +tries=1 @127.0.0.1 -p 53 example.com A" in live
+    assert "fail 'live AdGuard Home DNS query failed'" in live
 
 
-def test_vm_guest_live_blocklist_check_avoids_full_redownload():
+def test_vm_guest_live_waits_for_adguard_filters_without_manual_redownload():
     source = (REPO / "tools/vm/guest-tests.sh").read_text()
     live_start = source.index('if [ "$profile" = live ]; then')
     live = source[live_start : source.index("\nfi\n", live_start)]
-    assert "/var/run/adblock-fast/dnsmasq.servers" in live
-    assert "adblock-fast dnsmasq.servers missing after live setup" in live
-    assert "adblock-fast dnsmasq.servers too small:" in live
+    assert "/opt/adguardhome/data/filters" in live
+    assert "AdGuard Home did not download all enabled filters" in live
     assert "uclient-fetch \"$url\" -O /dev/null" not in live
     assert "blocklist unavailable:" not in live
-    assert "/tmp/vm-test-blocklist-urls" in live
+    assert 'while [ "$filter_attempt" -lt 90 ]; do' in live
 
 
 def test_vm_guest_uses_diagnostics_for_pre_confirmation_failures():

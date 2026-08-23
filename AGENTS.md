@@ -22,8 +22,8 @@ candidate can disconnect the router and require local recovery.
 - `modules/` holds internal shell modules sourced by `setup.sh` or
   `router-config.sh`. They are not standalone commands. Fixed order matters:
   base packages (setup only), then during prepare staging: network, firewall,
-  wireless, admin-access, nts, dns-over-https, adblock-fast, wireguard. Package
-  install callbacks for NTS, DNS, adblock, and WireGuard run from `setup.sh`
+  wireless, admin-access, attendedsysupgrade, nts, AdGuard Home, wireguard. Package
+  install callbacks for NTS, AdGuard Home, and WireGuard run from `setup.sh`
   before prepare.
 - `uci/` holds feature-oriented UCI batch overlays applied onto a copy of the
   live config inside a candidate directory. They are not full replacements for
@@ -37,7 +37,8 @@ candidate can disconnect the router and require local recovery.
 
 UCI changes are built and applied as one candidate, together with managed
 `/etc/modules.conf` for Wireless Ethernet Dispatch (WED) and
-`/etc/chrony/chrony.conf` for Chrony source selection:
+`/etc/chrony/chrony.conf` for Chrony source selection, and
+`/etc/adguardhome/adguardhome.yaml` for DNS:
 
 1. `prepare --recovery-ready` copies live UCI into
    `/root/router-config-backups/<id>/backup` and `candidate`, copies
@@ -47,17 +48,19 @@ UCI changes are built and applied as one candidate, together with managed
    and installs runtime helpers.
 2. `apply <id>` verifies the manifest, marks the transaction pending, installs
    the candidate into `/etc/config`, `/etc/modules.conf`, and
-   `/etc/chrony/chrony.conf`, runs `fw4 check`, reloads services, starts a
-   five-minute watchdog, and waits for confirmation.
+   `/etc/chrony/chrony.conf`, plus the AdGuard Home YAML, runs `fw4 check`,
+   reloads services, starts a five-minute watchdog, and waits for confirmation.
 3. `confirm <id>` from a second local/recovery-capable session clears pending
    and keeps the change. Without confirmation, the watchdog restores the
    backup. A reboot with a pending file triggers early-boot recovery.
    Reboot after confirm for WED (`mt7915e wed_enable`) to load; do not reboot
    while pending.
 
-Package installation and init-service enablement happen before the protected
-transaction and are not removed by rollback. Prefer this prepare/apply/confirm
-path over direct remote replacement of live config files.
+Package installation and most init-service enablement happen before the
+protected transaction and are not removed by rollback. AdGuard Home is the
+exception: its prior enablement is backed up, it is enabled only on confirm,
+and rollback restores the prior state. Prefer this prepare/apply/confirm path
+over direct remote replacement of live config files.
 
 ## Environment and execution safety
 
@@ -92,7 +95,7 @@ path over direct remote replacement of live config files.
   firewall zones, forwarding, and DNS divert rules consistent as one change.
   Keep per-VLAN reject-to-WAN rules for DoT (`dest_port=853`, `tcp udp`) and
   DoQ (`dest_port=8853`, `udp`) in the encrypted-DNS overlay
-  (`uci/dns-over-https`).
+  (`uci/adguard-home`).
 - Every VLAN must have an explicit DHCP decision. Managed pools live in
   `uci/network`; preserve named sections and documented ranges.
 - Preserve the isolation policy in `uci/firewall` / `docs/firewall.md`: Pixel
@@ -144,13 +147,13 @@ path over direct remote replacement of live config files.
 - Shell variables are not expanded by copying a UCI file. WireGuard rendering
   must happen explicitly; reject any leftover `${...}` placeholder before
   install.
-- Keep dnsmasq's upstream list identical to the named `https-dns-proxy` listen
-  ports, and keep the two daemons from contending for the same ports.
-  `https-dns-proxy` must not mutate dnsmasq or firewall outside the
-  transaction (`dnsmasq_config_update='-'`, `force_dns='0'`, `notrack_dns='0'`).
+- Keep AdGuard Home primary on port 53 and dnsmasq on port 54 with no public
+  dnsmasq upstreams or cache. AdGuard must route `.lan` and private PTR queries
+  to dnsmasq. Preserve per-VLAN DHCP option 6, port-53 interception, port-54
+  bypass rejects, and the DoT/DoQ rejects as one transaction.
 - Use `chrony-nts` (not plain `chrony`) for time sync. Disable BusyBox
   `sysntpd` so only one NTP client runs. Keep NTS servers primary and retain
-  plain NTP-by-IP chrony sources for cold-boot bootstrap before DNS/DoH TLS.
+  plain NTP-by-IP chrony sources for cold-boot bootstrap before encrypted DNS TLS.
   Set `authselectmode ignore` immediately before
   `confdir /var/etc/chrony.d` in the main Chrony configuration so plain sources
   can synchronize independently; mark every NTS source `prefer` and no
@@ -166,7 +169,8 @@ path over direct remote replacement of live config files.
 - Validate every required variable before the first router mutation. Required
   secrets/settings are `PIXEL_WIFI_PASSWORD`, `THINGS_WIFI_PASSWORD`,
   `GUEST_WIFI_PASSWORD`, `IOT_WIFI_PASSWORD`, `COUNTRY`, `VPN_IF`, `VPN_PORT`,
-  `VPN_KEY`, and `VPN_ADDR`. There is no `VPN_ADDR6`.
+  `VPN_KEY`, `VPN_ADDR`, `ADGUARD_USERNAME`, and `ADGUARD_PASSWORD_HASH`. There
+  is no `VPN_ADDR6`; `DNS_REBIND_DOMAIN` remains optional.
   `COUNTRY` is a required two-letter ISO code with no default. Optional
   `CHANNEL` defaults to `36` (5 GHz non-DFS); the wireless module also forces
   5 GHz `htmode=HE80`.
@@ -225,7 +229,8 @@ uci get firewall.defaults.flow_offloading
 uci get firewall.defaults.flow_offloading_hw
 grep -x 'options mt7915e wed_enable=Y' /etc/modules.conf
 grep -B1 -x 'confdir /var/etc/chrony.d' /etc/chrony/chrony.conf
-uci show https-dns-proxy
+uci show adguardhome
+grep -E '^(http:|dns:|filters:|querylog:|statistics:)' /etc/adguardhome/adguardhome.yaml
 uci show chrony
 uci show uhttpd | grep listen_
 uci show dropbear
@@ -233,7 +238,7 @@ chronyc tracking
 chronyc -n selectdata -a
 chronyc -N authdata
 /etc/init.d/sysntpd enabled >/dev/null 2>&1 && echo 'sysntpd still enabled'
-logread -e netifd -e firewall -e https-dns-proxy -e chronyd -e uhttpd -e dropbear
+logread -e netifd -e firewall -e adguardhome -e dnsmasq -e chronyd -e uhttpd -e dropbear
 ```
 
 Confirm from a client in each VLAN that DHCP and DNS work, expected internet

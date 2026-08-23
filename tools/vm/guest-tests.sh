@@ -35,7 +35,7 @@ fail() {
     done
     fw4 print >&2 2>&1 || :
     nft list ruleset >&2 2>&1 || :
-    for service in network firewall chronyd https-dns-proxy dnsmasq adblock-fast; do
+    for service in network firewall chronyd dnsmasq adguardhome; do
         "/etc/init.d/$service" status >&2 2>&1 || :
     done
     logread >&2 2>&1 || :
@@ -58,15 +58,14 @@ fail() {
 }
 
 export_normalized_uci() {
-    for package in network firewall wireless dhcp system chrony https-dns-proxy adblock-fast uhttpd dropbear attendedsysupgrade; do
+    for package in network firewall wireless dhcp system chrony adguardhome uhttpd dropbear attendedsysupgrade; do
         uci show "$package"
     done |
         sed \
             -e '/\.private_key=/d' \
             -e '/\.preshared_key=/d' \
             -e '/^wireless\.[^.]*\.key=/d' \
-            -e '/^dhcp\.dnsmasq\.serversfile=/d' \
-            -e '/^adblock-fast\.[^.]*\.size=/d' |
+            -e '/^dhcp\.dnsmasq\.serversfile=/d' |
         awk '
             {
                 key = $0
@@ -78,22 +77,19 @@ export_normalized_uci() {
         sort
 }
 
-check_doh_listeners() {
-    doh_phase=$1
-    for doh_port in 5053 5054 5055 5056; do
-        [ "$(uci show https-dns-proxy | grep -c "listen_port='$doh_port'")" = 1 ] ||
-            fail "$doh_phase: DoH port $doh_port is not unique"
-        if ! ss -lntu | grep -Eq "127\.0\.0\.1:${doh_port}[[:space:]]"; then
-            {
-                printf 'phase: %s\n' "$doh_phase"
-                printf '%s\n' '--- ss -lntu ---'
-                ss -lntu
-                printf '%s\n' '--- /proc/net listeners ---'
-                grep -E ':(13BD|13BE|13BF|13C0)[[:space:]]' /proc/net/tcp /proc/net/udp 2>&1 || :
-            } >/tmp/vm-test-failure-detail
-            fail "$doh_phase: DoH listener $doh_port is not bound"
-        fi
-    done
+check_dns_listeners() {
+    dns_phase=$1
+    if ! ss -lntu | grep -Eq '(^|[.:])53[[:space:]]'; then
+        fail "$dns_phase: AdGuard Home DNS port 53 is not bound"
+    fi
+    if ! ss -lntu | grep -Eq '(^|[.:])54[[:space:]]'; then
+        fail "$dns_phase: dnsmasq local DNS port 54 is not bound"
+    fi
+    if ! ss -lnt | grep -Eq '192\.168\.8\.1:3000[[:space:]]'; then
+        fail "$dns_phase: AdGuard Home dashboard is not bound to Pixel"
+    fi
+    ! ss -lnt | grep -Eq '192\.168\.(9|10|11)\.1:3000[[:space:]]' ||
+        fail "$dns_phase: AdGuard Home dashboard is exposed to a restricted VLAN"
 }
 
 check_ap_interfaces() {
@@ -378,6 +374,24 @@ if [ "$apk_ready" != 1 ]; then
     fail 'apk update failed after WAN recovery'
 fi
 
+# QEMU user networking exposes its synthetic ISP resolver at 192.168.2.3 but
+# does not reliably pass direct public UDP/53, which AdGuard Home normally uses
+# to bootstrap named DoH upstreams.  Seed only the stable VM's disposable hosts
+# file so later HTTPS/idempotency checks exercise AdGuard without pretending to
+# validate external bootstrap reachability.  The live profile deliberately
+# keeps the production bootstrap path untouched.
+if [ "$profile" = stable ]; then
+    for upstream_spec in \
+        '9.9.9.9|dns.quad9.net' \
+        '1.1.1.2|security.cloudflare-dns.com' \
+        '76.76.2.11|freedns.controld.com' \
+        '194.242.2.4|base.dns.mullvad.net'; do
+        upstream_address=${upstream_spec%%|*}
+        upstream_host=${upstream_spec#*|}
+        printf '%s %s\n' "$upstream_address" "$upstream_host" >>/etc/hosts
+    done
+fi
+
 server_private=$(wg genkey)
 server_public=$(printf '%s' "$server_private" | wg pubkey)
 client_private=$(wg genkey)
@@ -390,6 +404,9 @@ export IOT_WIFI_PASSWORD='vm-iot-password'
 export COUNTRY='US'
 export CHANNEL='36'
 export DNS_REBIND_DOMAIN='VM.Example'
+export ADGUARD_USERNAME='admin'
+# shellcheck disable=SC2016 # Literal bcrypt hash; dollar signs must not expand.
+export ADGUARD_PASSWORD_HASH='$2y$04$B9b7J6M1xwkLCfIRfpm7S.c8T3EPROaz2EJ1/CM2IpkAMGI1euIcy'
 export VPN_IF='wgserver'
 export VPN_PORT='42451'
 export VPN_KEY="$server_private"
@@ -401,7 +418,7 @@ run_and_confirm() {
     setup_pid=$!
     pending=
     attempts=0
-    # Package install plus apply/reload (especially adblock-fast) can exceed three
+    # Package install plus AdGuard Home apply/reload can exceed three
     # minutes on the emulated AArch64 CI VM, so wait well beyond that.
     while [ "$attempts" -lt 900 ]; do
         attempts=$((attempts + 1))
@@ -473,16 +490,47 @@ fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
 [ "$(uci -q get attendedsysupgrade.client.login_check_for_upgrades)" = 1 ] ||
     fail 'LuCI login upgrade check is not enabled'
-[ "$(uci -q get dhcp.dnsmasq.rebind_protection)" = 1 ] ||
-    fail 'dnsmasq rebind protection is not enabled'
-rebind_domain_count=$(
-    uci -q show dhcp.dnsmasq.rebind_domain |
-        grep -Fxc "dhcp.dnsmasq.rebind_domain='vm.example'" || :
-)
-[ "$rebind_domain_count" = 1 ] ||
-    fail 'DNS rebind exception is not installed exactly once'
-grep -q '^rebind-domain-ok=/vm.example/$' /var/etc/dnsmasq.conf.* ||
-    fail 'generated dnsmasq configuration lacks the DNS rebind exception'
+[ "$(uci -q get dhcp.dnsmasq.port)" = 54 ] || fail 'dnsmasq is not on port 54'
+[ "$(uci -q get dhcp.dnsmasq.cachesize)" = 0 ] || fail 'dnsmasq cache is not disabled'
+[ -z "$(uci -q get dhcp.dnsmasq.server || :)" ] || fail 'dnsmasq retained a public upstream'
+for dhcp_dns_spec in \
+    pixel:192.168.8.1 pixelguest:192.168.9.1 \
+    pixeliot:192.168.10.1 pixelthings:192.168.11.1; do
+    dhcp_section=${dhcp_dns_spec%%:*}
+    dhcp_gateway=${dhcp_dns_spec#*:}
+    [ "$(uci -q get "dhcp.$dhcp_section.dhcp_option")" = "6,$dhcp_gateway" ] ||
+        fail "DHCP does not advertise AdGuard Home on $dhcp_section"
+done
+[ "$(uci -q get adguardhome.config.config_file)" = /etc/adguardhome/adguardhome.yaml ] ||
+    fail 'AdGuard Home UCI config path is incorrect'
+[ "$(uci -q get adguardhome.config.work_dir)" = /opt/adguardhome ] ||
+    fail 'AdGuard Home work directory is not persistent'
+/etc/init.d/adguardhome enabled >/dev/null 2>&1 || fail 'AdGuard Home is not enabled after confirmation'
+/usr/bin/AdGuardHome --check-config --config /etc/adguardhome/adguardhome.yaml --no-check-update ||
+    fail 'installed AdGuard Home configuration is invalid'
+grep -Fq -- '@@||vm.example^' /etc/adguardhome/adguardhome.yaml ||
+    fail 'AdGuard Home DNS rebind exception is missing'
+enabled_filter_count=$(awk '
+    /^filters:/ { in_filters = 1; next }
+    /^whitelist_filters:/ { in_filters = 0 }
+    in_filters && /^[[:space:]]*-?[[:space:]]*enabled:[[:space:]]*true[[:space:]]*$/ { count++ }
+    END { print count + 0 }
+' /etc/adguardhome/adguardhome.yaml)
+[ "$enabled_filter_count" = 22 ] ||
+    fail 'AdGuard Home does not contain exactly 22 enabled filters'
+grep -Eq '^[[:space:]]*name:[[:space:]]*AdGuard DNS filter[[:space:]]*$' \
+    /etc/adguardhome/adguardhome.yaml ||
+    fail 'AdGuard DNS filter is not enabled'
+grep -Eq '^[[:space:]]*name:[[:space:]]*AdAway Default Blocklist[[:space:]]*$' \
+    /etc/adguardhome/adguardhome.yaml ||
+    fail 'AdAway Default Blocklist is not enabled'
+grep -Eq '^[[:space:]]*name:[[:space:]]*HaGeZi DNS Rebind Protection[[:space:]]*$' \
+    /etc/adguardhome/adguardhome.yaml ||
+    fail 'HaGeZi DNS Rebind Protection is not enabled'
+[ "$(grep -Ec '^[[:space:]]*interval:[[:space:]]*7d[[:space:]]*$' \
+    /etc/adguardhome/adguardhome.yaml)" = 2 ] ||
+    fail 'AdGuard Home retention is not seven days'
+check_dns_listeners 'after first installation'
 [ -z "$(uci -q show network | sed -n "/=wireguard_${VPN_IF}$/p")" ] ||
     fail 'fresh installation created a WireGuard peer'
 [ "$(uci -q get "network.${VPN_IF}.addresses")" = "$VPN_ADDR" ] ||
@@ -492,11 +540,6 @@ wg show "$VPN_IF" >/dev/null || fail 'WireGuard server interface is not availabl
 grep -qx 'options mt7915e wed_enable=Y' /etc/modules.conf || fail 'WED is not enabled in modules.conf'
 wed_count=$(grep -c 'wed_enable=' /etc/modules.conf || :)
 [ "$wed_count" = 1 ] || fail 'modules.conf has duplicate WED options'
-adblock_cron_count=$(
-    grep -Fxc '0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto' \
-        /etc/crontabs/root || :
-)
-[ "$adblock_cron_count" = 1 ] || fail 'AdBlock-Fast automatic list update is not enabled exactly once'
 [ "$(uci -q get chrony.cloudflare.nts)" = 1 ] || fail 'Cloudflare NTS server is missing'
 [ "$(uci -q get chrony.netnod.nts)" = 1 ] || fail 'Netnod NTS server is missing'
 [ "$(uci -q get chrony.time_nl.nts)" = 1 ] || fail 'time.nl NTS server is missing'
@@ -585,7 +628,7 @@ fi
 # sockets the way apk's wget does.
 if [ "$profile" = live ]; then
     /etc/init.d/chronyd stop || fail 'failed to stop chronyd for cold-boot test'
-    /etc/init.d/https-dns-proxy stop || :
+    /etc/init.d/adguardhome stop || :
     /etc/init.d/dnsmasq stop || fail 'failed to stop dnsmasq for cold-boot test'
     rm -f /var/run/chrony/* /var/run/chrony-dhcp/*
     date -s '2020-01-01 00:00:00' >/dev/null ||
@@ -630,9 +673,8 @@ if [ "$profile" = live ]; then
         } >/tmp/vm-test-failure-detail
         fail 'plain numeric NTP did not step the bad clock while DNS was unavailable'
     fi
-    /etc/init.d/https-dns-proxy start ||
-        fail 'failed to restore https-dns-proxy after cold-boot test'
     /etc/init.d/dnsmasq start || fail 'failed to restore dnsmasq after cold-boot test'
+    /etc/init.d/adguardhome start || fail 'failed to restore AdGuard Home after cold-boot test'
     chronyc refresh >/dev/null 2>&1 || fail 'failed to refresh Chrony source resolution'
     nts_authenticated=0
     nts_attempt=0
@@ -652,14 +694,14 @@ if [ "$profile" = live ]; then
             printf '%s\n' '--- chronyc sources ---'
             chronyc -n sources -v 2>&1 || :
         } >/tmp/vm-test-failure-detail
-        fail 'NTS did not authenticate after DNS and DoH recovery'
+        fail 'NTS did not authenticate after DNS recovery'
     fi
-    check_doh_listeners 'before live DoH'
+    check_dns_listeners 'before live AdGuard Home checks'
     live_egress_ready=0
     live_egress_attempt=0
     while [ "$live_egress_attempt" -lt 15 ]; do
         live_egress_attempt=$((live_egress_attempt + 1))
-        printf 'vm-test: live DoH egress probe attempt %s/15\n' "$live_egress_attempt" >&2
+        printf 'vm-test: live DNS egress probe attempt %s/15\n' "$live_egress_attempt" >&2
         if ping -c 1 -W 2 192.168.2.1 >/tmp/vm-test-live-doh-ping 2>&1 &&
             uclient-fetch -T 10 -O /dev/null https://downloads.openwrt.org/ \
                 >/tmp/vm-test-live-doh-wget 2>&1; then
@@ -673,7 +715,7 @@ if [ "$profile" = live ]; then
     done
     if [ "$live_egress_ready" != 1 ]; then
         {
-            printf 'live DoH egress failed after %s attempts\n' "$live_egress_attempt"
+            printf 'live DNS egress failed after %s attempts\n' "$live_egress_attempt"
             printf '%s\n' '--- ping probe ---'
             cat /tmp/vm-test-live-doh-ping 2>&1 || :
             printf '%s\n' '--- wget probe ---'
@@ -685,66 +727,41 @@ if [ "$profile" = live ]; then
             printf '%s\n' '--- ip route ---'
             ip -4 route || :
         } >/tmp/vm-test-failure-detail 2>&1 || :
-        fail 'live DoH egress was not ready'
+        fail 'live DNS egress was not ready'
     fi
-    /etc/init.d/https-dns-proxy restart || fail 'failed to restart https-dns-proxy for live DoH'
-    check_doh_listeners 'after live DoH restart'
-    for port in 5053 5054 5055 5056; do
-        doh_ok=0
-        doh_attempt=0
-        while [ "$doh_attempt" -lt 8 ]; do
-            doh_attempt=$((doh_attempt + 1))
-            printf 'vm-test: live DoH dig %s attempt %s/8\n' "$port" "$doh_attempt" >&2
-            if dig +time=5 +tries=1 @127.0.0.1 -p "$port" example.com A \
-                >/tmp/vm-test-live-doh-dig 2>&1 &&
-                grep -q 'status: NOERROR' /tmp/vm-test-live-doh-dig; then
-                doh_ok=1
-                break
-            fi
-            sleep 2
-        done
-        if [ "$doh_ok" != 1 ]; then
-            {
-                printf 'live DoH query failed on %s after %s attempts\n' "$port" "$doh_attempt"
-                printf '%s\n' '--- dig output ---'
-                cat /tmp/vm-test-live-doh-dig 2>&1 || :
-                printf '%s\n' '--- https-dns-proxy status ---'
-                /etc/init.d/https-dns-proxy status 2>&1 || :
-                printf '%s\n' '--- ss listeners ---'
-                ss -lntu || :
-                printf '%s\n' '--- WAN status ---'
-                ifstatus wan || :
-                printf '%s\n' '--- ip route ---'
-                ip -4 route || :
-                printf '%s\n' '--- https-dns-proxy / dig log ---'
-                logread -e https-dns-proxy -e dig 2>&1 || :
-            } >/tmp/vm-test-failure-detail 2>&1 || :
-            fail "live DoH query failed on $port"
+    /etc/init.d/adguardhome restart || fail 'failed to restart AdGuard Home for live DNS'
+    check_dns_listeners 'after live AdGuard Home restart'
+    dns_ok=0
+    dns_attempt=0
+    while [ "$dns_attempt" -lt 12 ]; do
+        dns_attempt=$((dns_attempt + 1))
+        if dig +time=5 +tries=1 @127.0.0.1 -p 53 example.com A \
+            >/tmp/vm-test-live-dns-dig 2>&1 &&
+            grep -q 'status: NOERROR' /tmp/vm-test-live-dns-dig; then
+            dns_ok=1
+            break
         fi
+        sleep 2
     done
-    # Do not re-download multi-megabyte blocklists here. Setup already fetched
-    # them, and once dnsmasq.servers is active a source host that appears in any
-    # list (or a slow QEMU user-net transfer) makes uclient-fetch fail spuriously.
-    [ -s /var/run/adblock-fast/dnsmasq.servers ] ||
-        fail 'adblock-fast dnsmasq.servers missing after live setup'
-    blocklist_lines=$(wc -l </var/run/adblock-fast/dnsmasq.servers)
-    [ "$blocklist_lines" -gt 1000 ] ||
-        fail "adblock-fast dnsmasq.servers too small: $blocklist_lines lines"
-    uci show adblock-fast | sed -n "s/.*\.url='\(.*\)'/\1/p" >/tmp/vm-test-blocklist-urls
-    [ -s /tmp/vm-test-blocklist-urls ] || fail 'no adblock-fast source URLs configured'
-    while IFS= read -r url; do
-        [ -n "$url" ] || continue
-        case "$url" in
-            https://* | http://*) ;;
-            *) fail "adblock-fast source is not an http(s) URL: $url" ;;
-        esac
-    done </tmp/vm-test-blocklist-urls
+    [ "$dns_ok" = 1 ] || fail 'live AdGuard Home DNS query failed'
+    filter_ready=0
+    filter_attempt=0
+    while [ "$filter_attempt" -lt 90 ]; do
+        filter_attempt=$((filter_attempt + 1))
+        filter_count=$(find /opt/adguardhome/data/filters -type f -name '*.txt' 2>/dev/null | wc -l)
+        [ "$filter_count" -ge 22 ] && {
+            filter_ready=1
+            break
+        }
+        sleep 2
+    done
+    [ "$filter_ready" = 1 ] || fail 'AdGuard Home did not download all enabled filters'
 fi
 
-check_doh_listeners 'before rollback'
+check_dns_listeners 'before rollback'
 /usr/libexec/router-config rollback "$LAST_TX"
 [ "$(cat "/root/router-config-backups/$LAST_TX/state")" = rolledback ] || fail 'manual rollback did not complete'
-check_doh_listeners 'after manual rollback'
+check_dns_listeners 'after manual rollback'
 check_ap_interfaces 'after manual rollback'
 
 boot_prepare=$(./router-config.sh prepare --recovery-ready)
@@ -753,7 +770,27 @@ touch "/root/router-config-backups/$boot_tx/pending"
 printf '%s\n' pending >"/root/router-config-backups/$boot_tx/state"
 /etc/init.d/router-config-rollback start
 [ "$(cat "/root/router-config-backups/$boot_tx/state")" = rolledback ] || fail 'early-boot service did not recover pending state'
-check_doh_listeners 'after early-boot recovery'
+/etc/init.d/adguardhome enabled >/dev/null 2>&1 ||
+    fail 'early-boot recovery did not restore AdGuard Home enablement'
+# The rollback hook runs at START=05 and deliberately leaves service startup to
+# the later normal boot sequence.  This VM invokes the hook after boot, so
+# emulate those later init stages before checking runtime listeners.
+/etc/init.d/dnsmasq restart || fail 'dnsmasq failed after early-boot recovery'
+/etc/init.d/adguardhome start || fail 'AdGuard Home failed after early-boot recovery'
+recovery_dns_ready=0
+recovery_dns_attempt=0
+while [ "$recovery_dns_attempt" -lt 15 ]; do
+    recovery_dns_attempt=$((recovery_dns_attempt + 1))
+    if ss -lntu | grep -Eq '(^|[.:])53[[:space:]]' &&
+        ss -lntu | grep -Eq '(^|[.:])54[[:space:]]' &&
+        ss -lnt | grep -Eq '192\.168\.8\.1:3000[[:space:]]'; then
+        recovery_dns_ready=1
+        break
+    fi
+    sleep 1
+done
+[ "$recovery_dns_ready" = 1 ] || fail 'DNS services did not become ready after early-boot recovery'
+check_dns_listeners 'after early-boot recovery'
 check_ap_interfaces 'after early-boot recovery'
 
 # Associate one isolated WPA3-SAE hwsim station with each managed SSID and
@@ -885,18 +922,21 @@ http_probe() {
 ! http_probe guest 192.168.9.1 || fail 'Guest reached LuCI HTTP on its own gateway'
 ! http_probe iot 192.168.10.1 || fail 'IoT reached LuCI HTTP on its own gateway'
 ! http_probe things 192.168.11.1 || fail 'Things reached LuCI HTTP on its own gateway'
+! http_probe guest 192.168.9.1:3000 || fail 'Guest reached AdGuard Home on its own gateway'
+! http_probe iot 192.168.10.1:3000 || fail 'IoT reached AdGuard Home on its own gateway'
+! http_probe things 192.168.11.1:3000 || fail 'Things reached AdGuard Home on its own gateway'
 
 # A local deterministic answer proves that queries sent to a nonexistent
 # external resolver are intercepted at port 53.
-uci -q del_list dhcp.dnsmasq.address='/vm.test/203.0.113.7' 2>/dev/null || :
-uci add_list dhcp.dnsmasq.address='/vm.test/203.0.113.7'
+uci -q del_list dhcp.dnsmasq.address='/vm.lan/203.0.113.7' 2>/dev/null || :
+uci add_list dhcp.dnsmasq.address='/vm.lan/203.0.113.7'
 uci commit dhcp
 /etc/init.d/dnsmasq restart
 dns_ready=0
 dns_attempt=0
 while [ "$dns_attempt" -lt 30 ]; do
     dns_attempt=$((dns_attempt + 1))
-    if dig +short +time=1 +tries=1 @127.0.0.1 vm.test A \
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p 54 vm.lan A \
         >/tmp/vm-test-dns-local 2>&1 &&
         grep -qx 203.0.113.7 /tmp/vm-test-dns-local; then
         dns_ready=1
@@ -914,6 +954,9 @@ if [ "$dns_ready" != 1 ]; then
     } >/tmp/vm-test-failure-detail
     fail 'dnsmasq did not serve the interception test answer'
 fi
+! ip netns exec pixel1 dig +short +time=1 +tries=1 \
+    @192.168.8.1 -p 54 vm.lan A >/dev/null 2>&1 ||
+    fail 'Pixel bypassed AdGuard Home through dnsmasq port 54'
 
 isp_transit_counter() {
     nft list chain inet fw4 "forward_$1" 2>/dev/null |
@@ -961,7 +1004,7 @@ dns_before=$(nft list ruleset |
     head -n 1)
 [ -n "$dns_before" ] || fail 'Guest DNS interception rule has no nftables counter'
 if ! ip netns exec guest dig +short +time=3 +tries=1 \
-    @203.0.113.250 vm.test A >/tmp/vm-test-dns-intercepted 2>&1 ||
+    @203.0.113.250 vm.lan A >/tmp/vm-test-dns-intercepted 2>&1 ||
     ! grep -qx 203.0.113.7 /tmp/vm-test-dns-intercepted; then
     dns_after=$(nft list ruleset |
         sed -n '/PixelGuest-Divert-DNS/s/.*counter packets \([0-9][0-9]*\).*/\1/p' |
@@ -1048,9 +1091,7 @@ if [ "$wan_probe_ready" != 1 ]; then
 fi
 ! ip netns exec iot ping -c 1 -W 2 198.18.0.2 >/dev/null 2>&1 || fail 'IoT reached WAN'
 /etc/init.d/firewall reload || fail 'firewall reload failed after static VM WAN activation'
-# Count every Guest TCP/853 forward reject. adblock-fast force_dns injects its
-# own DoT drop ahead of the named PixelGuest-Reject-DoT rule, so a successful
-# blocklist load shadows the named counter while still rejecting DoT.
+# Count every Guest TCP/853 forward reject.
 guest_dot_counter() {
     nft list chain inet fw4 forward_pixelguest 2>/dev/null |
         sed -n 's/.*tcp dport 853 counter packets \([0-9][0-9]*\).*/\1/p' |
@@ -1151,7 +1192,6 @@ rm -f /tmp/timeout-apply.pid /tmp/timeout-apply.log
 setsid sh -c '
     printf "%s\n" "$$" >/tmp/timeout-apply.pid
     exec env ROUTER_CONFIG_TIMEOUT=5 ROUTER_CONFIG_POLL_INTERVAL=1 \
-        ROUTER_CONFIG_ADBLOCK_INIT=/bin/true \
         /usr/libexec/router-config apply "$1"
 ' sh "$timeout_tx" >/tmp/timeout-apply.log 2>&1 &
 timeout_launcher_pid=$!

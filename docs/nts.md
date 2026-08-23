@@ -14,7 +14,7 @@ It makes these coordinated changes:
 - Configures named NTS servers (`time.cloudflare.com`, `nts.netnod.se`,
   `ntppool1.time.nl`) with `iburst`, `nts`, and `prefer`.
 - Keeps four plain NTP-by-IP bootstrap sources so the clock can be set without
-  DNS before DoH TLS is available. These sources are not preferred, but remain
+  DNS before encrypted upstream TLS is available. These sources are not preferred, but remain
   eligible whenever the preferred NTS sources are unavailable.
 - Adds `authselectmode ignore` immediately before the package's
   `confdir /var/etc/chrony.d` line. Chrony 4.8 otherwise defaults to `mix`,
@@ -50,6 +50,6 @@ After apply, inspect `/etc/chrony/chrony.conf`,
 `chronyc -n selectdata -a`, and `chronyc -N authdata -a` (NTS sources should
 report mode `NTS`). A physical cold-boot acceptance test should start from a
 genuinely bad clock with DNS unavailable, prove a numeric source steps it, then
-restore DNS/DoH and prove NTS authentication.
+restore DNS and prove NTS authentication.
 
 [Back to the README](../README.md)

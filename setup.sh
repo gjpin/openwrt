@@ -49,10 +49,10 @@ validate_repository() {
     for repository_file in \
         router-config.sh router-config-rollback.init \
         uci/network uci/firewall uci/wireless uci/admin-access uci/attendedsysupgrade uci/nts \
-        uci/dns-over-https uci/adblock-fast uci/wireguard \
+        uci/adguard-home uci/wireguard \
         modules/base-packages.sh modules/network.sh modules/firewall.sh \
         modules/wireless.sh modules/admin-access.sh modules/attendedsysupgrade.sh modules/nts.sh \
-        modules/dns-over-https.sh modules/adblock-fast.sh modules/wireguard.sh; do
+        modules/adguard-home.sh modules/wireguard.sh; do
         [ -f "$SCRIPT_DIR/$repository_file" ] && [ -s "$SCRIPT_DIR/$repository_file" ] ||
             die "repository file is missing or empty: $repository_file"
     done
@@ -61,8 +61,7 @@ validate_repository() {
 
 validate_inputs() {
     CHANNEL=${CHANNEL:-36}
-    DNS_REBIND_DOMAIN=${DNS_REBIND_DOMAIN:-}
-    dns_over_https_preflight
+    adguard_home_inputs_preflight
     for variable_name in \
         PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
         VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY; do
@@ -106,12 +105,13 @@ validate_inputs() {
 # Validate the entire public environment contract before the first router
 # mutation. Error messages intentionally name variables but never print values.
 validate_repository
-# Load the shared DNS input validator before any router mutation.
+# Load the shared AdGuard Home input validator before any router mutation.
 # shellcheck source=/dev/null
-. "$SCRIPT_DIR/modules/dns-over-https.sh"
+. "$SCRIPT_DIR/modules/adguard-home.sh"
 validate_inputs
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
 export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL DNS_REBIND_DOMAIN
+export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH
 
 # Reject unsupported or ambiguous stock configuration before package
 # installation or init-service enablement performs the first router mutation.
@@ -124,14 +124,11 @@ export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL DNS_REBIND_DOMAIN
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/modules/nts.sh"
 # shellcheck source=/dev/null
-. "$SCRIPT_DIR/modules/adblock-fast.sh"
-# shellcheck source=/dev/null
 . "$SCRIPT_DIR/modules/wireguard.sh"
 
 base_packages_run
 nts_install
-dns_over_https_install
-adblock_fast_install
+adguard_home_install
 wireguard_install
 
 prepare_output=$("$SCRIPT_DIR/router-config.sh" prepare --recovery-ready)

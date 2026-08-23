@@ -1,7 +1,7 @@
 # OpenWrt router configuration
 
 This repository provisions a device-specific OpenWrt network with four isolated
-VLANs, encrypted DNS, DNS blocklists, and a WireGuard server. Changes are built
+VLANs, encrypted DNS, AdGuard Home, and a WireGuard server. Changes are built
 as one validated candidate and applied with automatic rollback unless they are
 confirmed within five minutes.
 
@@ -14,10 +14,11 @@ confirmed within five minutes.
 - Allowlisted inter-VLAN and internet access
 - LuCI and SSH bound to the Pixel gateway only (`192.168.8.1` / `pixel`)
 - LuCI checks for attended sysupgrades when the Status Overview page loads
-- HTTPS DNS proxy upstreams with DNS bypass controls (DoT/DoQ port rejects)
+- AdGuard Home as the primary DNS resolver, using encrypted upstreams and DNS
+  bypass controls (port-53 interception plus DoT/DoQ rejects)
 - Preferred authenticated NTP via `chrony-nts` (NTS), with unauthenticated
   NTP-by-IP cold-boot and outage fallback
-- DNS-based ad and tracker blocking
+- DNS-based ad and tracker blocking with an authenticated Pixel-only dashboard
 - An IPv4-only WireGuard server attached to the trusted Pixel zone, with no
   preconfigured client peers
 - Static IPv4 WAN behind an ISP router (`192.168.2.2/24`, gateway
@@ -80,6 +81,10 @@ must run on the target router as `root`; do not run it on a workstation.
    # export CHANNEL='36'
    # Optional: permit private DNS answers for this apex and its subdomains.
    # export DNS_REBIND_DOMAIN='mydomain.com'
+   export ADGUARD_USERNAME='admin'
+   # Generate this bcrypt hash off-router, for example with Apache htpasswd:
+   # htpasswd -bnBC 12 '' 'replace-me' | cut -d: -f2
+   export ADGUARD_PASSWORD_HASH='$2y$12$replace-with-a-real-60-character-bcrypt-hash'
    export VPN_IF='wgserver'
    export VPN_PORT='42451'
    export VPN_KEY="$(wg genkey)"
@@ -88,11 +93,12 @@ must run on the target router as `root`; do not run it on a workstation.
    ```
 12. Access 192.168.8.1 via 2 SSH: root@192.168.8.1
 13. Run `/usr/libexec/router-config confirm TRANSACTION_ID`
-14. Run `reboot`
-15. Create WireGuard peers by running add-wireguard-peers.sh in Flint (MUST add the peers in the TODO section)
+14. Open the AdGuard Home dashboard at `http://192.168.8.1:3000` from Pixel.
+15. Run `reboot`
+16. Create WireGuard peers by running add-wireguard-peers.sh in Flint (MUST add the peers in the TODO section)
   - Get the wireguard configs from /root/wireguard-clients
   - Create a port forward in ISP router for wireguard
-16. Add Flint to ISP router DMZ
+17. Add Flint to ISP router DMZ
 
 
 ## Development checks
@@ -120,8 +126,8 @@ python3 tools/run-vm-tests.py --profile stable
 
 Use `--keep-workdir` to retain the disposable disk and redacted serial log after
 a run. `--profile live` additionally tests bad-clock synchronization from a
-numeric NTP source while DNS/DoH is stopped, subsequent NTS authentication,
-every external DoH provider, and blocklist URLs; run it from the manual CI
+numeric NTP source while DNS is stopped, subsequent NTS authentication,
+AdGuard Home encrypted upstream resolution, and filter downloads; run it from the manual CI
 workflow when needed. On Linux x86_64, the exact target package/flash-fit gate
 is:
 
@@ -155,6 +161,5 @@ the transaction helper. They are not standalone commands.
 - [Admin access](docs/admin-access.md)
 - [Attended Sysupgrade](docs/attendedsysupgrade.md)
 - [Encrypted NTP (NTS)](docs/nts.md)
-- [Encrypted DNS](docs/dns-over-https.md)
-- [Ad blocking](docs/adblock-fast.md)
+- [AdGuard Home DNS and ad blocking](docs/adguard-home.md)
 - [WireGuard](docs/wireguard.md)

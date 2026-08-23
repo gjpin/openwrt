@@ -1,35 +1,31 @@
-# Feature overlay: DoH upstreams and encrypted-DNS policy.
+# Feature overlay: AdGuard Home primary DNS, dnsmasq local DNS, and DNS bypass policy.
 
-set https-dns-proxy.config='main'
-set https-dns-proxy.config.dnsmasq_config_update='-'
-set https-dns-proxy.config.force_dns='0'
-set https-dns-proxy.config.notrack_dns='0'
+delete adguardhome.config
+set adguardhome.config='adguardhome'
+set adguardhome.config.config_file='/etc/adguardhome/adguardhome.yaml'
+set adguardhome.config.work_dir='/opt/adguardhome'
+set adguardhome.config.user='adguardhome'
+set adguardhome.config.group='adguardhome'
+set adguardhome.config.verbose='0'
 
-set https-dns-proxy.quad9='https-dns-proxy'
-set https-dns-proxy.quad9.resolver_url='https://dns.quad9.net/dns-query'
-set https-dns-proxy.quad9.listen_port='5053'
-set https-dns-proxy.quad9.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
-set https-dns-proxy.cloudflare_security='https-dns-proxy'
-set https-dns-proxy.cloudflare_security.resolver_url='https://security.cloudflare-dns.com/dns-query'
-set https-dns-proxy.cloudflare_security.listen_port='5054'
-set https-dns-proxy.cloudflare_security.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
-set https-dns-proxy.control_d_ads_tracking='https-dns-proxy'
-set https-dns-proxy.control_d_ads_tracking.resolver_url='https://freedns.controld.com/p2'
-set https-dns-proxy.control_d_ads_tracking.listen_port='5055'
-set https-dns-proxy.control_d_ads_tracking.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
-set https-dns-proxy.mullvad_base='https-dns-proxy'
-set https-dns-proxy.mullvad_base.resolver_url='https://base.dns.mullvad.net/dns-query'
-set https-dns-proxy.mullvad_base.listen_port='5056'
-set https-dns-proxy.mullvad_base.bootstrap_dns='9.9.9.11,1.1.1.1,8.8.8.8'
-
+set dhcp.dnsmasq.port='54'
 set dhcp.dnsmasq.noresolv='1'
-set dhcp.dnsmasq.cachesize='8192'
-set dhcp.dnsmasq.rebind_protection='1'
+set dhcp.dnsmasq.cachesize='0'
+set dhcp.dnsmasq.localservice='1'
+set dhcp.dnsmasq.domain='lan'
+set dhcp.dnsmasq.local='/lan/'
+set dhcp.dnsmasq.expandhosts='1'
 delete dhcp.dnsmasq.server
-add_list dhcp.dnsmasq.server='127.0.0.1#5053'
-add_list dhcp.dnsmasq.server='127.0.0.1#5054'
-add_list dhcp.dnsmasq.server='127.0.0.1#5055'
-add_list dhcp.dnsmasq.server='127.0.0.1#5056'
+delete dhcp.dnsmasq.rebind_domain
+
+delete dhcp.pixel.dhcp_option
+add_list dhcp.pixel.dhcp_option='6,192.168.8.1'
+delete dhcp.pixelguest.dhcp_option
+add_list dhcp.pixelguest.dhcp_option='6,192.168.9.1'
+delete dhcp.pixeliot.dhcp_option
+add_list dhcp.pixeliot.dhcp_option='6,192.168.10.1'
+delete dhcp.pixelthings.dhcp_option
+add_list dhcp.pixelthings.dhcp_option='6,192.168.11.1'
 
 set network.wan.peerdns='0'
 
@@ -61,6 +57,13 @@ set firewall.reject_doq_pixel.dest='wan'
 set firewall.reject_doq_pixel.dest_port='8853'
 set firewall.reject_doq_pixel.proto='udp'
 set firewall.reject_doq_pixel.target='REJECT'
+delete firewall.reject_dnsmasq_pixel
+set firewall.reject_dnsmasq_pixel='rule'
+set firewall.reject_dnsmasq_pixel.name='Pixel-Reject-dnsmasq-Bypass'
+set firewall.reject_dnsmasq_pixel.src='pixel'
+set firewall.reject_dnsmasq_pixel.dest_port='54'
+set firewall.reject_dnsmasq_pixel.proto='tcp udp'
+set firewall.reject_dnsmasq_pixel.target='REJECT'
 
 delete firewall.divert_dns_pixelguest
 set firewall.divert_dns_pixelguest='redirect'
@@ -86,6 +89,13 @@ set firewall.reject_doq_pixelguest.dest='wan'
 set firewall.reject_doq_pixelguest.dest_port='8853'
 set firewall.reject_doq_pixelguest.proto='udp'
 set firewall.reject_doq_pixelguest.target='REJECT'
+delete firewall.reject_dnsmasq_pixelguest
+set firewall.reject_dnsmasq_pixelguest='rule'
+set firewall.reject_dnsmasq_pixelguest.name='PixelGuest-Reject-dnsmasq-Bypass'
+set firewall.reject_dnsmasq_pixelguest.src='pixelguest'
+set firewall.reject_dnsmasq_pixelguest.dest_port='54'
+set firewall.reject_dnsmasq_pixelguest.proto='tcp udp'
+set firewall.reject_dnsmasq_pixelguest.target='REJECT'
 
 delete firewall.divert_dns_pixelthings
 set firewall.divert_dns_pixelthings='redirect'
@@ -111,6 +121,13 @@ set firewall.reject_doq_pixelthings.dest='wan'
 set firewall.reject_doq_pixelthings.dest_port='8853'
 set firewall.reject_doq_pixelthings.proto='udp'
 set firewall.reject_doq_pixelthings.target='REJECT'
+delete firewall.reject_dnsmasq_pixelthings
+set firewall.reject_dnsmasq_pixelthings='rule'
+set firewall.reject_dnsmasq_pixelthings.name='PixelThings-Reject-dnsmasq-Bypass'
+set firewall.reject_dnsmasq_pixelthings.src='pixelthings'
+set firewall.reject_dnsmasq_pixelthings.dest_port='54'
+set firewall.reject_dnsmasq_pixelthings.proto='tcp udp'
+set firewall.reject_dnsmasq_pixelthings.target='REJECT'
 
 delete firewall.divert_dns_pixeliot
 set firewall.divert_dns_pixeliot='redirect'
@@ -136,3 +153,10 @@ set firewall.reject_doq_pixeliot.dest='wan'
 set firewall.reject_doq_pixeliot.dest_port='8853'
 set firewall.reject_doq_pixeliot.proto='udp'
 set firewall.reject_doq_pixeliot.target='REJECT'
+delete firewall.reject_dnsmasq_pixeliot
+set firewall.reject_dnsmasq_pixeliot='rule'
+set firewall.reject_dnsmasq_pixeliot.name='PixelIoT-Reject-dnsmasq-Bypass'
+set firewall.reject_dnsmasq_pixeliot.src='pixeliot'
+set firewall.reject_dnsmasq_pixeliot.dest_port='54'
+set firewall.reject_dnsmasq_pixeliot.proto='tcp udp'
+set firewall.reject_dnsmasq_pixeliot.target='REJECT'

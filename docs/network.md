@@ -24,8 +24,9 @@ the candidate replaces the stock LAN.
 
 Every IPv4 DHCP pool is enabled with a 12-hour lease. IPv6 delegation, router
 advertisements, DHCPv6, and NDP proxying are disabled on every managed network,
-and IPv6 is disabled on WAN. Client DNS is provided by dnsmasq /
-`https-dns-proxy`; the overlay does not set WAN DNS servers.
+and IPv6 is disabled on WAN. Client DNS is provided directly by AdGuard Home;
+dnsmasq remains on port 54 for DHCP and local/PTR resolution. The overlay does
+not set WAN DNS servers.
 
 ## Ethernet layout
 

@@ -17,14 +17,13 @@ FIREWALL_INIT=${ROUTER_CONFIG_FIREWALL_INIT:-/etc/init.d/firewall}
 UHTTPD_INIT=${ROUTER_CONFIG_UHTTPD_INIT:-/etc/init.d/uhttpd}
 DROPBEAR_INIT=${ROUTER_CONFIG_DROPBEAR_INIT:-/etc/init.d/dropbear}
 CHRONYD_INIT=${ROUTER_CONFIG_CHRONYD_INIT:-/etc/init.d/chronyd}
-HTTPS_DNS_PROXY_INIT=${ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT:-/etc/init.d/https-dns-proxy}
 DNSMASQ_INIT=${ROUTER_CONFIG_DNSMASQ_INIT:-/etc/init.d/dnsmasq}
-ADBLOCK_INIT=${ROUTER_CONFIG_ADBLOCK_INIT:-/etc/init.d/adblock-fast}
-CRON_INIT=${ROUTER_CONFIG_CRON_INIT:-/etc/init.d/cron}
+ADGUARDHOME_INIT=${ROUTER_CONFIG_ADGUARDHOME_INIT:-/etc/init.d/adguardhome}
+ADGUARDHOME_BIN=${ROUTER_CONFIG_ADGUARDHOME_BIN:-/usr/bin/AdGuardHome}
+ADGUARDHOME_CONFIG=${ROUTER_CONFIG_ADGUARDHOME_CONFIG:-/etc/adguardhome/adguardhome.yaml}
 PROC_NET_DIR=${ROUTER_CONFIG_PROC_NET_DIR:-/proc/net}
 MODULES_CONF=${ROUTER_CONFIG_MODULES_CONF:-/etc/modules.conf}
 CHRONY_CONF=${ROUTER_CONFIG_CHRONY_CONF:-/etc/chrony/chrony.conf}
-ROOT_CRONTAB=${ROUTER_CONFIG_ROOT_CRONTAB:-/etc/crontabs/root}
 TIMEOUT=${ROUTER_CONFIG_TIMEOUT:-300}
 POLL_INTERVAL=${ROUTER_CONFIG_POLL_INTERVAL:-1}
 WATCHDOG_READY_ATTEMPTS=${ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS:-10}
@@ -45,8 +44,8 @@ else
     MODULE_DIR=${LIBEXEC}.modules
 fi
 RUNTIME_MODULE_DIR=${ROUTER_CONFIG_RUNTIME_MODULE_DIR:-${LIBEXEC}.modules}
-UCI_PACKAGES='network firewall wireless dhcp system https-dns-proxy adblock-fast chrony uhttpd dropbear attendedsysupgrade'
-MODULES='network firewall wireless admin-access attendedsysupgrade nts dns-over-https adblock-fast wireguard'
+UCI_PACKAGES='network firewall wireless dhcp system adguardhome chrony uhttpd dropbear attendedsysupgrade'
+MODULES='network firewall wireless admin-access attendedsysupgrade nts adguard-home wireguard'
 
 die() {
     printf 'router-config: %s\n' "$*" >&2
@@ -67,6 +66,7 @@ require_commands() {
     for command_name in uci fw4 ubus wifi sha256sum; do
         command -v "$command_name" >/dev/null 2>&1 || die "required command not found: $command_name"
     done
+    [ -x "$ADGUARDHOME_BIN" ] || die "required command not found: $ADGUARDHOME_BIN"
 }
 
 require_base_commands() {
@@ -204,12 +204,10 @@ preflight_base() {
 
 preflight() {
     require_commands
-    dns_over_https_preflight
+    adguard_home_inputs_preflight
     preflight_base
-    for config_name in https-dns-proxy adblock-fast; do
-        [ -s "$CONFIG_DIR/$config_name" ] || die "missing or empty $CONFIG_DIR/$config_name"
-        uci -q -c "$CONFIG_DIR" show "$config_name" >/dev/null || die "malformed UCI package: $config_name"
-    done
+    [ -s "$CONFIG_DIR/adguardhome" ] || die "missing or empty $CONFIG_DIR/adguardhome"
+    uci -q -c "$CONFIG_DIR" show adguardhome >/dev/null || die 'malformed UCI package: adguardhome'
     nts_preflight
 }
 
@@ -251,8 +249,7 @@ validate_candidate() {
     admin_access_validate "$candidate_dir"
     attendedsysupgrade_validate "$candidate_dir"
     nts_validate "$candidate_dir"
-    dns_over_https_validate "$candidate_dir"
-    adblock_fast_validate "$candidate_dir"
+    adguard_home_validate "$candidate_dir"
     wireguard_validate "$candidate_dir"
 }
 
@@ -270,7 +267,9 @@ write_manifest() {
     done
     manifest_files="$manifest_files backup/modules.conf candidate/modules.conf"
     manifest_files="$manifest_files backup/chrony.conf candidate/chrony.conf"
-    manifest_files="$manifest_files backup/crontab.root candidate/crontab.root"
+    manifest_files="$manifest_files backup/adguardhome.yaml candidate/adguardhome.yaml"
+    manifest_files="$manifest_files backup/adguardhome.present candidate/adguardhome.present"
+    manifest_files="$manifest_files backup/adguardhome.enabled candidate/adguardhome.enabled"
     # Intentional splitting of the internally constructed relative path list.
     # shellcheck disable=SC2086
     (cd "$transaction_dir" && sha256sum $manifest_files) >"$transaction_dir/manifest.sha256"
@@ -329,14 +328,22 @@ prepare() {
     fi
     cp "$CHRONY_CONF" "$transaction_dir/backup/chrony.conf"
     cp "$CHRONY_CONF" "$transaction_dir/candidate/chrony.conf"
-    if [ -f "$ROOT_CRONTAB" ]; then
-        cp "$ROOT_CRONTAB" "$transaction_dir/backup/crontab.root"
-        cp "$ROOT_CRONTAB" "$transaction_dir/candidate/crontab.root"
+    if [ -f "$ADGUARDHOME_CONFIG" ]; then
+        cp "$ADGUARDHOME_CONFIG" "$transaction_dir/backup/adguardhome.yaml"
+        printf '%s\n' 1 >"$transaction_dir/backup/adguardhome.present"
     else
-        : >"$transaction_dir/backup/crontab.root"
-        : >"$transaction_dir/candidate/crontab.root"
+        : >"$transaction_dir/backup/adguardhome.yaml"
+        printf '%s\n' 0 >"$transaction_dir/backup/adguardhome.present"
     fi
-    for overlay_name in network firewall wireless admin-access attendedsysupgrade nts dns-over-https adblock-fast; do
+    if "$ADGUARDHOME_INIT" enabled >/dev/null 2>&1; then
+        printf '%s\n' 1 >"$transaction_dir/backup/adguardhome.enabled"
+    else
+        printf '%s\n' 0 >"$transaction_dir/backup/adguardhome.enabled"
+    fi
+    cp "$transaction_dir/backup/adguardhome.yaml" "$transaction_dir/candidate/adguardhome.yaml"
+    printf '%s\n' 1 >"$transaction_dir/candidate/adguardhome.present"
+    printf '%s\n' 1 >"$transaction_dir/candidate/adguardhome.enabled"
+    for overlay_name in network firewall wireless admin-access attendedsysupgrade nts adguard-home; do
         cp "$UCI_DIR/$overlay_name" "$transaction_dir/overlay/$overlay_name"
     done
     wireguard_render_overlay "$UCI_DIR/wireguard" "$transaction_dir/overlay/wireguard"
@@ -348,11 +355,11 @@ prepare() {
     admin_access_stage "$transaction_dir/candidate" "$transaction_dir/overlay/admin-access"
     attendedsysupgrade_stage "$transaction_dir/candidate" "$transaction_dir/overlay/attendedsysupgrade"
     nts_stage "$transaction_dir/candidate" "$transaction_dir/overlay/nts"
-    dns_over_https_stage "$transaction_dir/candidate" "$transaction_dir/overlay/dns-over-https"
-    adblock_fast_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adblock-fast"
+    adguard_home_stage "$transaction_dir/candidate" "$transaction_dir/overlay/adguard-home"
     wireguard_stage "$transaction_dir/candidate" "$transaction_dir/overlay/wireguard"
     chmod 600 "$transaction_dir/candidate/modules.conf" "$transaction_dir/candidate/chrony.conf" \
-        "$transaction_dir/candidate/crontab.root"
+        "$transaction_dir/candidate/adguardhome.yaml" "$transaction_dir/candidate/adguardhome.present" \
+        "$transaction_dir/candidate/adguardhome.enabled"
     validate_candidate "$transaction_dir/candidate"
     write_manifest "$transaction_dir"
     printf '%s\n' prepared >"$transaction_dir/state"
@@ -394,14 +401,23 @@ install_chrony_conf() {
     mv -f "$install_temp" "$CHRONY_CONF" || return 1
 }
 
-install_root_crontab() {
+install_adguard_home_config() {
     source_dir=$1
-    crontab_parent=${ROOT_CRONTAB%/*}
-    [ "$crontab_parent" = "$ROOT_CRONTAB" ] || mkdir -p "$crontab_parent" || return 1
-    install_temp=$ROOT_CRONTAB.router-config.$$
-    cp "$source_dir/crontab.root" "$install_temp" || return 1
+    config_parent=${ADGUARDHOME_CONFIG%/*}
+    [ "$config_parent" = "$ADGUARDHOME_CONFIG" ] || mkdir -p "$config_parent" || return 1
+    if [ "$(sed -n '1p' "$source_dir/adguardhome.present")" = 0 ]; then
+        rm -f "$ADGUARDHOME_CONFIG" || return 1
+        return 0
+    fi
+    install_temp=$ADGUARDHOME_CONFIG.router-config.$$
+    cp "$source_dir/adguardhome.yaml" "$install_temp" || return 1
     chmod 600 "$install_temp" || return 1
-    mv -f "$install_temp" "$ROOT_CRONTAB" || return 1
+    if [ "${ROUTER_CONFIG_TESTING:-0}" != 1 ]; then
+        chown adguardhome:adguardhome "$install_temp" || return 1
+        chmod 700 "$config_parent" || return 1
+        chown adguardhome:adguardhome "$config_parent" || return 1
+    fi
+    mv -f "$install_temp" "$ADGUARDHOME_CONFIG" || return 1
 }
 
 install_candidate() {
@@ -409,70 +425,36 @@ install_candidate() {
     install_uci_files "$candidate_dir" || return 1
     install_modules_conf "$candidate_dir" || return 1
     install_chrony_conf "$candidate_dir" || return 1
-    install_root_crontab "$candidate_dir" || return 1
+    install_adguard_home_config "$candidate_dir" || return 1
 }
 
-https_dns_proxy_listen_ports() {
-    uci -q -c "$CONFIG_DIR" show https-dns-proxy |
-        sed -n "s/^[^=]*\.listen_port='\([0-9][0-9]*\)'$/\1/p"
+socket_port_listening() {
+    socket_protocol=$1
+    socket_port=$2
+    hex_port=$(printf '%04X' "$socket_port")
+    grep -Eq ":[0]*${hex_port}[[:space:]]" "$PROC_NET_DIR/$socket_protocol" 2>/dev/null
 }
 
-https_dns_proxy_port_listening() {
-    hex_port=$(printf '%04X' "$1")
-    grep -Eq "[[:space:]]0100007F:${hex_port}[[:space:]]" \
-        "$PROC_NET_DIR/tcp" "$PROC_NET_DIR/udp" 2>/dev/null
+adguard_home_listeners_ready() {
+    socket_port_listening tcp 53 && socket_port_listening udp 53 &&
+        socket_port_listening tcp 54 && socket_port_listening udp 54 &&
+        socket_port_listening tcp 3000
 }
 
-https_dns_proxy_listeners_ready() {
-    listen_ports=$(https_dns_proxy_listen_ports)
-    [ -n "$listen_ports" ] || return 1
-    for listen_port in $listen_ports; do
-        https_dns_proxy_port_listening "$listen_port" || return 1
-    done
-}
-
-https_dns_proxy_listeners_stopped() {
-    listen_ports=$(https_dns_proxy_listen_ports)
-    [ -n "$listen_ports" ] || return 1
-    for listen_port in $listen_ports; do
-        ! https_dns_proxy_port_listening "$listen_port" || return 1
-    done
-}
-
-stop_https_dns_proxy() {
-    "$HTTPS_DNS_PROXY_INIT" stop && return 0
-    # Version 2026.03.18-r4 returns 1 from service_stopped even after a
-    # successful stop. Accept that status only after its sockets are gone.
-    info 'https-dns-proxy stop returned nonzero; verifying listeners stopped'
+wait_for_adguard_home_listeners() {
     health_attempts=10
     [ "${ROUTER_CONFIG_TESTING:-0}" != 1 ] || health_attempts=1
     health_attempt=0
     while [ "$health_attempt" -lt "$health_attempts" ]; do
         health_attempt=$((health_attempt + 1))
-        https_dns_proxy_listeners_stopped && return 0
+        adguard_home_listeners_ready && return 0
         [ "$health_attempt" -lt "$health_attempts" ] || break
         sleep 1
     done
     return 1
 }
 
-restart_https_dns_proxy() {
-    if ! "$HTTPS_DNS_PROXY_INIT" restart; then
-        info 'https-dns-proxy restart returned nonzero; verifying listeners'
-    fi
-    health_attempts=10
-    [ "${ROUTER_CONFIG_TESTING:-0}" != 1 ] || health_attempts=1
-    health_attempt=0
-    while [ "$health_attempt" -lt "$health_attempts" ]; do
-        health_attempt=$((health_attempt + 1))
-        https_dns_proxy_listeners_ready && return 0
-        [ "$health_attempt" -lt "$health_attempts" ] || break
-        sleep 1
-    done
-    return 1
-}
-
-reload_services() {
+reload_common_services() {
     RELOAD_FAILED_STEP=
     if ! "$NETWORK_INIT" reload; then
         RELOAD_FAILED_STEP=network
@@ -498,32 +480,60 @@ reload_services() {
         RELOAD_FAILED_STEP=chronyd
         return 1
     fi
-    if ! restart_https_dns_proxy; then
-        RELOAD_FAILED_STEP=https-dns-proxy
-        return 1
-    fi
+}
+
+reload_candidate_services() {
+    reload_common_services || return 1
     if ! "$DNSMASQ_INIT" restart; then
         RELOAD_FAILED_STEP=dnsmasq
         return 1
     fi
-    if ! "$ADBLOCK_INIT" restart; then
-        RELOAD_FAILED_STEP=adblock-fast
+    if ! "$ADGUARDHOME_INIT" restart; then
+        RELOAD_FAILED_STEP=adguardhome
         return 1
     fi
-    if ! "$CRON_INIT" reload; then
-        RELOAD_FAILED_STEP=cron
+    if ! wait_for_adguard_home_listeners; then
+        RELOAD_FAILED_STEP=adguardhome-listeners
         return 1
+    fi
+}
+
+reload_backup_services() {
+    backup_dir=$1
+    reload_common_services || return 1
+    if ! "$DNSMASQ_INIT" restart; then
+        RELOAD_FAILED_STEP=dnsmasq
+        return 1
+    fi
+    if [ "$(sed -n '1p' "$backup_dir/adguardhome.enabled")" = 1 ]; then
+        if ! "$ADGUARDHOME_INIT" restart; then
+            RELOAD_FAILED_STEP=adguardhome
+            return 1
+        fi
+        if ! wait_for_adguard_home_listeners; then
+            RELOAD_FAILED_STEP=adguardhome-listeners
+            return 1
+        fi
     fi
 }
 
 restore_transaction() {
     transaction_dir=$1
+    "$ADGUARDHOME_INIT" stop >/dev/null 2>&1 || :
+    "$ADGUARDHOME_INIT" disable >/dev/null 2>&1 ||
+        die 'CRITICAL: could not disable AdGuard Home during rollback'
     install_uci_files "$transaction_dir/backup" || die 'CRITICAL: UCI backup restoration failed'
     install_modules_conf "$transaction_dir/backup" || die 'CRITICAL: modules.conf backup restoration failed'
     install_chrony_conf "$transaction_dir/backup" || die 'CRITICAL: chrony.conf backup restoration failed'
-    install_root_crontab "$transaction_dir/backup" || die 'CRITICAL: root crontab backup restoration failed'
+    install_adguard_home_config "$transaction_dir/backup" ||
+        die 'CRITICAL: AdGuard Home configuration backup restoration failed'
+    if [ "$(sed -n '1p' "$transaction_dir/backup/adguardhome.enabled")" = 1 ]; then
+        "$ADGUARDHOME_INIT" enable >/dev/null 2>&1 ||
+            die 'CRITICAL: could not restore AdGuard Home enablement'
+    fi
     if [ "${2-}" != boot ]; then
-        reload_services || die 'CRITICAL: backups restored but a service reload failed'
+        reload_backup_services "$transaction_dir/backup" ||
+            die 'CRITICAL: backups restored but a service reload failed'
     fi
     printf '%s\n' rolledback >"$transaction_dir/state"
     rm -f "$transaction_dir/pending" "$transaction_dir/watchdog.pid"
@@ -635,13 +645,7 @@ apply_transaction() {
     watchdog_launcher_pid=
     watchdog_ready=0
     trap 'apply_interrupted' HUP INT TERM
-    # https-dns-proxy registers dynamic firewall rules through ubus. Remove
-    # rules derived from the old zone layout before installing and reloading
-    # the candidate firewall configuration.
-    if ! stop_https_dns_proxy; then
-        restore_transaction "$transaction_dir"
-        die 'could not stop https-dns-proxy; backups restored'
-    fi
+    "$ADGUARDHOME_INIT" stop >/dev/null 2>&1 || :
     if ! "$DNSMASQ_INIT" stop; then
         restore_transaction "$transaction_dir"
         die 'could not stop dnsmasq; backups restored'
@@ -654,7 +658,7 @@ apply_transaction() {
         restore_transaction "$transaction_dir"
         die 'fw4 rejected installed candidate; backups restored'
     fi
-    if ! reload_services; then
+    if ! reload_candidate_services; then
         failed_step=$RELOAD_FAILED_STEP
         restore_transaction "$transaction_dir"
         die "service reload failed at $failed_step; backups restored"
@@ -699,6 +703,8 @@ confirm_transaction() {
     acquire_lock
     transaction_dir=$TX_ROOT/$transaction_id
     [ -f "$transaction_dir/pending" ] || die 'transaction is not pending'
+    "$ADGUARDHOME_INIT" enable >/dev/null 2>&1 ||
+        die 'could not enable AdGuard Home; transaction remains pending'
     printf '%s\n' confirmed >"$transaction_dir/state"
     rm -f "$transaction_dir/pending"
     prune_confirmed

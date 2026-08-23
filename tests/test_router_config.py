@@ -177,29 +177,27 @@ def router():
     modules = tmp_path / "modules"
     modules_conf = tmp_path / "etc-modules.conf"
     chrony_conf = tmp_path / "chrony.conf"
-    root_crontab = tmp_path / "root.crontab"
+    adguardhome_config = tmp_path / "adguardhome.yaml"
     config.mkdir(); bin_dir.mkdir(); overlays.mkdir(); modules.mkdir(); proc_net.mkdir(parents=True)
     modules_conf.write_text("# test modules.conf\n")
     chrony_conf.write_text(
         "driftfile /var/run/chrony/chrony.drift\n"
         "confdir /var/etc/chrony.d\n"
     )
-    root_crontab.write_text(
-        "15 1 * * * /usr/bin/unrelated\n"
-        "# 30 2 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto-disabled\n"
-        "45 3 * * 1 /etc/init.d/adblock-fast dl # old-adblock-schedule\n"
-    )
     socket_lines = "".join(
         f"   {index}: 0100007F:{port:04X} 00000000:0000 0A\n"
-        for index, port in enumerate((5053, 5054, 5055, 5056, 5999))
+        for index, port in enumerate((53, 54, 3000))
     )
     (proc_net / "tcp").write_text(socket_lines)
-    (proc_net / "udp").write_text("")
+    (proc_net / "udp").write_text("".join(
+        f"   {index}: 0100007F:{port:04X} 00000000:0000 07\n"
+        for index, port in enumerate((53, 54))
+    ))
     for name in ("br-lan", "lan1", "lan2", "lan3", "lan4", "lan5"):
         (sys_net / name).mkdir(parents=True)
-    for name in ("network", "firewall", "wireless", "admin-access", "attendedsysupgrade", "nts", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "admin-access", "attendedsysupgrade", "nts", "adguard-home", "wireguard"):
         shutil.copy(REPO / "uci" / name, overlays / name)
-    for name in ("network", "firewall", "wireless", "admin-access", "attendedsysupgrade", "nts", "dns-over-https", "adblock-fast", "wireguard"):
+    for name in ("network", "firewall", "wireless", "admin-access", "attendedsysupgrade", "nts", "adguard-home", "wireguard"):
         shutil.copy(REPO / "modules" / f"{name}.sh", modules / f"{name}.sh")
 
     network = {
@@ -223,12 +221,15 @@ def router():
         "unrelated": {".type": "dhcp", "interface": "unrelated", "ignore": "1"},
     }
     system = {"ntp": {".type": "timeserver", "server": ["old"]}, "unrelated": {".type": "system", "hostname": "keep"}}
-    adblock = {"config": {".type": "adblock-fast", "enabled": "0"}, "unmanaged": {".type": "file_url", "name": "Keep me"}}
-    https_dns_proxy = {
-        "config": {".type": "main", "dnsmasq_config_update": "*", "force_dns": "1", "notrack_dns": "1"},
-        "@https-dns-proxy[0]": {".type": "https-dns-proxy", "resolver_url": "https://cloudflare-dns.com/dns-query", "listen_port": "5053"},
-        "@https-dns-proxy[1]": {".type": "https-dns-proxy", "resolver_url": "https://dns.google/dns-query", "listen_port": "5054"},
-        "unmanaged": {".type": "https-dns-proxy", "resolver_url": "https://example.invalid/dns-query", "listen_port": "5999"},
+    adguardhome = {
+        "config": {
+            ".type": "adguardhome",
+            "config_file": "/etc/adguardhome/adguardhome.yaml",
+            "work_dir": "/var/lib/adguardhome",
+            "user": "adguardhome",
+            "group": "adguardhome",
+            "verbose": "0",
+        },
     }
     chrony = {
         "@pool[0]": {".type": "pool", "hostname": "2.openwrt.pool.ntp.org", "iburst": "1"},
@@ -270,8 +271,7 @@ def router():
         ("wireless", wireless),
         ("dhcp", dhcp),
         ("system", system),
-        ("https-dns-proxy", https_dns_proxy),
-        ("adblock-fast", adblock),
+        ("adguardhome", adguardhome),
         ("chrony", chrony),
         ("uhttpd", uhttpd),
         ("dropbear", dropbear),
@@ -298,8 +298,16 @@ fi
 exit 0
 ''')
     write_executable(bin_dir / "fw4", "#!/bin/sh\n[ ! -e \"${FW4_FAIL_FILE:-/nonexistent}\" ]\n")
+    write_executable(bin_dir / "AdGuardHome", "#!/bin/sh\nexit 0\n")
     service_source = '''#!/bin/sh
 service_name=${0##*/}
+if [ "$service_name" = adguardhome-init ]; then
+    case ${1-} in
+        enabled) [ -e "$ADGUARDHOME_ENABLED_STATE" ]; exit ;;
+        enable) : >"$ADGUARDHOME_ENABLED_STATE"; exit 0 ;;
+        disable) rm -f "$ADGUARDHOME_ENABLED_STATE"; exit 0 ;;
+    esac
+fi
 if [ -e "${STOPPED_WITH_NONZERO_ONCE:-/nonexistent}" ] &&
     [ "${1-}" = stop ] &&
     [ "${STOP_FAIL_NAME:-}" = "$service_name" ]; then
@@ -336,10 +344,8 @@ exit 0
         "dropbear-init",
         "sysntpd-init",
         "chronyd-init",
-        "https-dns-proxy-init",
         "dnsmasq-init",
-        "adblock-init",
-        "cron-init",
+        "adguardhome-init",
     ):
         services[name] = bin_dir / name
         write_executable(services[name], service_source)
@@ -359,17 +365,17 @@ exit 0
         "ROUTER_CONFIG_MODULE_DIR": str(modules),
         "ROUTER_CONFIG_MODULES_CONF": str(modules_conf),
         "ROUTER_CONFIG_CHRONY_CONF": str(chrony_conf),
-        "ROUTER_CONFIG_ROOT_CRONTAB": str(root_crontab),
+        "ROUTER_CONFIG_ADGUARDHOME_CONFIG": str(adguardhome_config),
+        "ROUTER_CONFIG_ADGUARDHOME_BIN": str(bin_dir / "AdGuardHome"),
         "ROUTER_CONFIG_NETWORK_INIT": str(services["network-init"]),
         "ROUTER_CONFIG_FIREWALL_INIT": str(services["firewall-init"]),
         "ROUTER_CONFIG_UHTTPD_INIT": str(services["uhttpd-init"]),
         "ROUTER_CONFIG_DROPBEAR_INIT": str(services["dropbear-init"]),
         "ROUTER_CONFIG_SYSNTPD_INIT": str(services["sysntpd-init"]),
         "ROUTER_CONFIG_CHRONYD_INIT": str(services["chronyd-init"]),
-        "ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT": str(services["https-dns-proxy-init"]),
         "ROUTER_CONFIG_DNSMASQ_INIT": str(services["dnsmasq-init"]),
-        "ROUTER_CONFIG_ADBLOCK_INIT": str(services["adblock-init"]),
-        "ROUTER_CONFIG_CRON_INIT": str(services["cron-init"]),
+        "ROUTER_CONFIG_ADGUARDHOME_INIT": str(services["adguardhome-init"]),
+        "ADGUARDHOME_ENABLED_STATE": str(tmp_path / "adguardhome.enabled"),
         "ROUTER_CONFIG_TIMEOUT": "2",
         "ROUTER_CONFIG_POLL_INTERVAL": "0.05",
         "ROUTER_CONFIG_WATCHDOG_READY_ATTEMPTS": "500",
@@ -383,6 +389,8 @@ exit 0
         "VPN_PORT": "42451",
         "VPN_KEY": "private-secret",
         "VPN_ADDR": "10.10.0.1/24",
+        "ADGUARD_USERNAME": "admin",
+        "ADGUARD_PASSWORD_HASH": "$2y$04$B9b7J6M1xwkLCfIRfpm7S.c8T3EPROaz2EJ1/CM2IpkAMGI1euIcy",
     }
     env.pop("DNS_REBIND_DOMAIN", None)
     try:
@@ -424,11 +432,18 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert (backups / transaction).stat().st_mode & 0o777 == 0o700
     transaction_dir = backups / transaction
     dhcp = json.loads((transaction_dir / "candidate" / "dhcp").read_text())
-    for name in ("pixel", "pixelthings", "pixelguest", "pixeliot"):
+    gateways = {
+        "pixel": "192.168.8.1",
+        "pixelguest": "192.168.9.1",
+        "pixeliot": "192.168.10.1",
+        "pixelthings": "192.168.11.1",
+    }
+    for name, gateway in gateways.items():
         assert dhcp[name] == {
             ".type": "dhcp", "interface": name, "ignore": "0",
             "start": "100", "limit": "150", "leasetime": "12h",
             "ra": "disabled", "dhcpv6": "disabled", "ndp": "disabled",
+            "dhcp_option": [f"6,{gateway}"],
         }
     wireless = json.loads((transaction_dir / "candidate" / "wireless").read_text())
     assert wireless["pixel"]["device"] == "radio0"
@@ -476,27 +491,43 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "wed_enable=N" not in modules_conf
     assert "# test modules.conf" in modules_conf
     assert dhcp["unrelated"]["ignore"] == "1"
-    assert dhcp["dnsmasq"]["server"] == [
-        "127.0.0.1#5053", "127.0.0.1#5054", "127.0.0.1#5055", "127.0.0.1#5056",
-    ]
+    assert "server" not in dhcp["dnsmasq"]
+    assert dhcp["dnsmasq"]["port"] == "54"
     assert dhcp["dnsmasq"]["noresolv"] == "1"
-    assert dhcp["dnsmasq"]["cachesize"] == "8192"
-    proxy = json.loads((transaction_dir / "candidate" / "https-dns-proxy").read_text())
-    assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
-    assert proxy["config"] == {
-        ".type": "main", "dnsmasq_config_update": "-", "force_dns": "0", "notrack_dns": "0",
-    }
-    expected_proxy = {
-        "quad9": ("https://dns.quad9.net/dns-query", "5053"),
-        "cloudflare_security": ("https://security.cloudflare-dns.com/dns-query", "5054"),
-        "control_d_ads_tracking": ("https://freedns.controld.com/p2", "5055"),
-        "mullvad_base": ("https://base.dns.mullvad.net/dns-query", "5056"),
-    }
-    for name, (url, port) in expected_proxy.items():
-        assert proxy[name] == {
-            ".type": "https-dns-proxy", "resolver_url": url, "listen_port": port,
-            "bootstrap_dns": "9.9.9.11,1.1.1.1,8.8.8.8",
+    assert dhcp["dnsmasq"]["cachesize"] == "0"
+    assert dhcp["dnsmasq"]["domain"] == "lan"
+    assert dhcp["dnsmasq"]["local"] == "/lan/"
+    adguard_uci = json.loads((transaction_dir / "candidate" / "adguardhome").read_text())
+    assert adguard_uci == {
+        "config": {
+            ".type": "adguardhome",
+            "config_file": "/etc/adguardhome/adguardhome.yaml",
+            "work_dir": "/opt/adguardhome",
+            "user": "adguardhome",
+            "group": "adguardhome",
+            "verbose": "0",
         }
+    }
+    adguard_yaml = (transaction_dir / "candidate" / "adguardhome.yaml").read_text()
+    assert "  address: 192.168.8.1:3000\n" in adguard_yaml
+    assert "  - 192.168.11.1\n" in adguard_yaml
+    assert "  port: 53\n" in adguard_yaml
+    assert "  - '[/lan/]127.0.0.1:54'\n" in adguard_yaml
+    for upstream in (
+        "https://dns.quad9.net/dns-query",
+        "https://security.cloudflare-dns.com/dns-query",
+        "https://freedns.controld.com/p2",
+        "https://base.dns.mullvad.net/dns-query",
+    ):
+        assert adguard_yaml.count(upstream) == 1
+    assert adguard_yaml.count("  interval: 7d\n") == 2
+    assert adguard_yaml.count("- enabled: true\n") == 22
+    assert "  name: AdGuard DNS filter\n" in adguard_yaml
+    assert "  name: AdAway Default Blocklist\n" in adguard_yaml
+    assert "  name: HaGeZi DNS Rebind Protection\n" in adguard_yaml
+    assert "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt" not in adguard_yaml
+    assert env["ADGUARD_PASSWORD_HASH"] in adguard_yaml
+    assert env["ADGUARD_PASSWORD_HASH"] not in result.stdout + result.stderr
     chrony = json.loads((transaction_dir / "candidate" / "chrony").read_text())
     assert chrony["cloudflare"] == {
         ".type": "server", "hostname": "time.cloudflare.com", "iburst": "1",
@@ -538,38 +569,22 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "login_check_for_upgrade" not in attendedsysupgrade["client"]
     system = json.loads((transaction_dir / "candidate" / "system").read_text())
     assert system["ntp"]["server"] == ["old"]
-    adblock = json.loads((transaction_dir / "candidate" / "adblock-fast").read_text())
-    assert adblock["config"]["dnsmasq_validity_check"] == "1"
-    root_crontab = (transaction_dir / "candidate" / "crontab.root").read_text()
-    assert root_crontab == (
-        "15 1 * * * /usr/bin/unrelated\n"
-        "0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto\n"
-    )
-    sources = {name: section for name, section in adblock.items() if section[".type"] == "file_url"}
-    assert "unmanaged" not in adblock
-    assert len(sources) == 20
-    assert {section["name"] for section in sources.values()} == {
+    assert {
         "HaGeZi - Multi PRO", "OISD", "Steven Black", "Peter Lowe",
         "NextDNS - Windows", "NextDNS - Samsung", "NextDNS - Apple",
         "HaGeZi - Samsung native tracking", "HaGeZi - Prevent DNS bypass",
         "Smart TV", "HaGeZi - LG webOS", "Smart TV blocklist",
         "Block List Project - Smart TV", "Perflyst - Android tracking",
         "Divested - LG", "Divested - Mobile", "GameIndustry - Gaming hosts",
-        "AdGuard CNAME trackers", "CERT Polska", "AdGuard",
+        "AdGuard CNAME trackers", "CERT Polska",
+    } <= {
+        line.removeprefix("  name: ")
+        for line in adguard_yaml.splitlines()
+        if line.startswith("  name: ")
     }
-    assert all(section["action"] == "block" and section["enabled"] == "1" for section in sources.values())
-    assert sources["peter_lowe"]["url"].endswith("&mimetype=plaintext")
-    assert "/adblock/doh-vpn-proxy-bypass.txt" in sources["hagezi_dns_bypass"]["url"]
-    assert sources["hagezi_native_samsung"]["url"] == (
-        "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/"
-        "adblock/native.samsung.txt"
-    )
-    assert sources["blocklistproject_smart_tv"]["url"] == (
-        "https://blocklistproject.github.io/Lists/smart-tv.txt"
-    )
     manifest = (transaction_dir / "manifest.sha256").read_text()
-    assert "backup/https-dns-proxy" in manifest
-    assert "candidate/https-dns-proxy" in manifest
+    assert "backup/adguardhome" in manifest
+    assert "candidate/adguardhome" in manifest
     assert "backup/uhttpd" in manifest
     assert "candidate/uhttpd" in manifest
     assert "backup/dropbear" in manifest
@@ -578,11 +593,13 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "candidate/attendedsysupgrade" in manifest
     assert "backup/chrony.conf" in manifest
     assert "candidate/chrony.conf" in manifest
-    assert "backup/crontab.root" in manifest
-    assert "candidate/crontab.root" in manifest
+    assert "backup/adguardhome.yaml" in manifest
+    assert "candidate/adguardhome.yaml" in manifest
+    assert "backup/adguardhome.enabled" in manifest
+    assert "candidate/adguardhome.enabled" in manifest
     assert (transaction_dir / "candidate" / "wireless").stat().st_mode & 0o777 == 0o600
     assert (transaction_dir / "candidate" / "chrony.conf").stat().st_mode & 0o777 == 0o600
-    assert (transaction_dir / "candidate" / "crontab.root").stat().st_mode & 0o777 == 0o600
+    assert (transaction_dir / "candidate" / "adguardhome.yaml").stat().st_mode & 0o777 == 0o600
     rendered = (transaction_dir / "overlay" / "wireguard").read_text()
     assert env["VPN_KEY"] not in rendered
     assert "${" not in rendered
@@ -611,8 +628,7 @@ def test_repeated_prepare_is_idempotent(router):
         "wireless",
         "dhcp",
         "system",
-        "https-dns-proxy",
-        "adblock-fast",
+        "adguardhome",
         "chrony",
         "uhttpd",
         "dropbear",
@@ -626,8 +642,7 @@ def test_repeated_prepare_is_idempotent(router):
         "wireless",
         "dhcp",
         "system",
-        "https-dns-proxy",
-        "adblock-fast",
+        "adguardhome",
         "chrony",
         "uhttpd",
         "dropbear",
@@ -882,7 +897,7 @@ def test_prepare_rejects_invalid_channel(router):
 
 
 @pytest.mark.parametrize("configured_value", [None, ""])
-def test_rebind_domain_unset_or_empty_preserves_existing_exceptions(
+def test_rebind_domain_unset_or_empty_renders_no_adguard_exception(
     router, configured_value
 ):
     _, config, backups, _, env = router
@@ -896,55 +911,37 @@ def test_rebind_domain_unset_or_empty_preserves_existing_exceptions(
 
     _, transaction = prepare(env)
     candidate = json.loads((backups / transaction / "candidate" / "dhcp").read_text())
-    assert candidate["dnsmasq"]["rebind_domain"] == [
-        "existing.example", "other.example",
-    ]
-    assert candidate["dnsmasq"]["rebind_protection"] == "1"
+    assert "rebind_domain" not in candidate["dnsmasq"]
+    yaml = (backups / transaction / "candidate" / "adguardhome.yaml").read_text()
+    assert "user_rules: []\n" in yaml
 
 
-def test_rebind_domain_is_normalized_deduplicated_and_idempotent(router):
+def test_rebind_domain_is_normalized_and_idempotent(router):
     _, config, backups, _, env = router
-    dhcp = json.loads((config / "dhcp").read_text())
-    dhcp["dnsmasq"]["rebind_domain"] = [
-        "existing.example", "mydomain.com", "mydomain.com",
-    ]
-    (config / "dhcp").write_text(json.dumps(dhcp))
     env["DNS_REBIND_DOMAIN"] = "MyDomain.COM"
 
     _, first = prepare(env)
-    first_candidate = json.loads(
-        (backups / first / "candidate" / "dhcp").read_text()
-    )
-    assert first_candidate["dnsmasq"]["rebind_domain"] == [
-        "existing.example", "mydomain.com",
-    ]
+    first_yaml = (backups / first / "candidate" / "adguardhome.yaml").read_text()
+    assert first_yaml.count("- '@@||mydomain.com^'") == 1
 
-    (config / "dhcp").write_text(
-        (backups / first / "candidate" / "dhcp").read_text()
+    (config / "adguardhome").write_text(
+        (backups / first / "candidate" / "adguardhome").read_text()
     )
     _, second = prepare(env)
-    second_candidate = json.loads(
-        (backups / second / "candidate" / "dhcp").read_text()
-    )
-    assert second_candidate["dnsmasq"]["rebind_domain"] == [
-        "existing.example", "mydomain.com",
-    ]
+    second_yaml = (backups / second / "candidate" / "adguardhome.yaml").read_text()
+    assert second_yaml == first_yaml
 
 
-def test_changing_rebind_domain_is_additive(router):
-    _, config, backups, _, env = router
+def test_changing_rebind_domain_replaces_the_managed_exception(router):
+    _, _, backups, _, env = router
     env["DNS_REBIND_DOMAIN"] = "first.example"
     _, first = prepare(env)
-    (config / "dhcp").write_text(
-        (backups / first / "candidate" / "dhcp").read_text()
-    )
 
     env["DNS_REBIND_DOMAIN"] = "second.example"
     _, second = prepare(env)
-    candidate = json.loads((backups / second / "candidate" / "dhcp").read_text())
-    assert candidate["dnsmasq"]["rebind_domain"] == [
-        "first.example", "second.example",
-    ]
+    candidate = (backups / second / "candidate" / "adguardhome.yaml").read_text()
+    assert "- '@@||second.example^'" in candidate
+    assert "first.example" not in candidate
 
 
 @pytest.mark.parametrize("domain", [
@@ -983,29 +980,6 @@ def test_setup_rejects_invalid_rebind_domain_before_mutation(router):
     assert result.returncode != 0
     assert "DNS_REBIND_DOMAIN" in result.stderr
     assert not marker.exists()
-
-
-def test_rebind_domain_candidate_validation_requires_exactly_one(router):
-    _, _, backups, _, env = router
-    env["DNS_REBIND_DOMAIN"] = "mydomain.com"
-    _, transaction = prepare(env)
-    candidate_dir = backups / transaction / "candidate"
-    dhcp_path = candidate_dir / "dhcp"
-    dhcp = json.loads(dhcp_path.read_text())
-    dhcp["dnsmasq"]["rebind_domain"].append("mydomain.com")
-    dhcp_path.write_text(json.dumps(dhcp))
-    command = (
-        'die() { printf "%s\\n" "$*" >&2; exit 1; }; '
-        'uci_get() { uci -q -c "$1" get "$2"; }; '
-        f'. "{REPO / "modules" / "dns-over-https.sh"}"; '
-        f'dns_over_https_validate "{candidate_dir}"'
-    )
-    result = subprocess.run(
-        ["sh", "-eu", "-c", command],
-        env=env, text=True, capture_output=True,
-    )
-    assert result.returncode != 0
-    assert "must appear exactly once" in result.stderr
 
 
 def test_setup_rejects_invalid_channel_before_mutation(router):
@@ -1085,14 +1059,14 @@ def test_missing_transaction_module_is_rejected(router):
 def test_apply_confirm_and_manual_rollback(router):
     _, config, backups, _, env = router
     env["ROUTER_CONFIG_TIMEOUT"] = "2"
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "adguardhome", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
     chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
     original_chrony_conf = chrony_conf.read_text()
-    root_crontab = Path(env["ROUTER_CONFIG_ROOT_CRONTAB"])
-    original_root_crontab = root_crontab.read_text()
+    adguardhome_config = Path(env["ROUTER_CONFIG_ADGUARDHOME_CONFIG"])
+    assert not adguardhome_config.exists()
     _, transaction = prepare(env)
     process = subprocess.Popen(
         [str(REPO / "router-config.sh"), "apply", transaction], env=env,
@@ -1128,16 +1102,16 @@ def test_apply_confirm_and_manual_rollback(router):
     assert modules_conf.read_text().count("options mt7915e wed_enable=Y") == 1
     assert chrony_conf.stat().st_mode & 0o777 == 0o644
     assert "authselectmode ignore\nconfdir /var/etc/chrony.d\n" in chrony_conf.read_text()
-    assert root_crontab.read_text().count(
-        "0 4 * * * /etc/init.d/adblock-fast dl # adblock-fast-auto"
-    ) == 1
-    proxy = json.loads((config / "https-dns-proxy").read_text())
-    assert set(proxy) == {"config", "quad9", "cloudflare_security", "control_d_ads_tracking", "mullvad_base"}
+    assert adguardhome_config.exists()
+    assert adguardhome_config.stat().st_mode & 0o777 == 0o600
+    assert "AdAway Default Blocklist" in adguardhome_config.read_text()
+    assert Path(env["ADGUARDHOME_ENABLED_STATE"]).exists()
     run_router(env, "rollback", transaction)
     assert {name: (config / name).read_text() for name in originals} == originals
     assert modules_conf.read_text() == original_modules
     assert chrony_conf.read_text() == original_chrony_conf
-    assert root_crontab.read_text() == original_root_crontab
+    assert not adguardhome_config.exists()
+    assert not Path(env["ADGUARDHOME_ENABLED_STATE"]).exists()
     assert chrony_conf.stat().st_mode & 0o777 == 0o644
 
 
@@ -1148,8 +1122,7 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     original_modules = modules_conf.read_text()
     chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
     original_chrony_conf = chrony_conf.read_text()
-    root_crontab = Path(env["ROUTER_CONFIG_ROOT_CRONTAB"])
-    original_root_crontab = root_crontab.read_text()
+    adguardhome_config = Path(env["ROUTER_CONFIG_ADGUARDHOME_CONFIG"])
     env["ROUTER_CONFIG_TIMEOUT"] = "0.15"
     _, transaction = prepare(env)
     result = run_router(env, "apply", transaction, check=False)
@@ -1165,7 +1138,7 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     shutil.copy(backups / transaction / "candidate" / "network", config / "network")
     shutil.copy(backups / transaction / "candidate" / "modules.conf", modules_conf)
     shutil.copy(backups / transaction / "candidate" / "chrony.conf", chrony_conf)
-    shutil.copy(backups / transaction / "candidate" / "crontab.root", root_crontab)
+    shutil.copy(backups / transaction / "candidate" / "adguardhome.yaml", adguardhome_config)
     (backups / transaction / "pending").touch()
     (backups / transaction / "state").write_text("pending\n")
     (backups / transaction / "watchdog.pid").write_text("999999\n")
@@ -1173,7 +1146,7 @@ def test_timeout_and_reboot_recovery_restore_backup(router):
     assert (config / "network").read_text() == original
     assert modules_conf.read_text() == original_modules
     assert chrony_conf.read_text() == original_chrony_conf
-    assert root_crontab.read_text() == original_root_crontab
+    assert not adguardhome_config.exists()
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
     assert not (backups / transaction / "pending").exists()
     assert not (backups / transaction / "watchdog.pid").exists()
@@ -1183,7 +1156,7 @@ def test_watchdog_survives_apply_session_hangup_and_restores_every_file(router):
     _, config, backups, _, env = router
     names = (
         "network", "firewall", "wireless", "dhcp", "system",
-        "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear",
+        "adguardhome", "chrony", "uhttpd", "dropbear",
     )
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
@@ -1233,7 +1206,7 @@ def test_watchdog_start_failure_restores_every_file(router):
     _, config, backups, _, env = router
     names = (
         "network", "firewall", "wireless", "dhcp", "system",
-        "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear",
+        "adguardhome", "chrony", "uhttpd", "dropbear",
     )
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
@@ -1269,80 +1242,43 @@ def test_fw4_failure_does_not_change_live_configuration(router):
 def test_apply_fw4_failure_restores_backup(router):
     root, config, backups, _, env = router
     original = (config / "network").read_text()
-    original_proxy = (config / "https-dns-proxy").read_text()
+    original_adguard = (config / "adguardhome").read_text()
     _, transaction = prepare(env)
     fail_file = root / "fw4-fail"; fail_file.touch(); env["FW4_FAIL_FILE"] = str(fail_file)
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert "backups restored" in result.stderr
     assert (config / "network").read_text() == original
-    assert (config / "https-dns-proxy").read_text() == original_proxy
+    assert (config / "adguardhome").read_text() == original_adguard
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
-def test_https_dns_proxy_stop_failure_restores_backup(router):
+def test_dnsmasq_stop_failure_restores_backup(router):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "adguardhome", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     _, transaction = prepare(env)
-    fail = root / "https-stop-fail"
+    fail = root / "dnsmasq-stop-fail"
     fail.touch()
     env["STOP_FAIL_ONCE"] = str(fail)
-    env["STOP_FAIL_NAME"] = "https-dns-proxy-init"
+    env["STOP_FAIL_NAME"] = "dnsmasq-init"
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
-    assert "could not stop https-dns-proxy; backups restored" in result.stderr
+    assert "could not stop dnsmasq; backups restored" in result.stderr
     assert {name: (config / name).read_text() for name in names} == originals
     assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
-def test_https_dns_proxy_nonzero_stop_is_accepted_when_all_listeners_stopped(router):
-    root, _, backups, _, env = router
+def test_missing_adguard_listener_restores_backup(router):
+    _, config, backups, _, env = router
+    original = (config / "network").read_text()
     _, transaction = prepare(env)
-    fail = root / "https-stopped-with-nonzero"
-    fail.touch()
-    env["STOPPED_WITH_NONZERO_ONCE"] = str(fail)
-    env["STOP_FAIL_NAME"] = "https-dns-proxy-init"
-    process = subprocess.Popen(
-        [str(REPO / "router-config.sh"), "apply", transaction], env=env,
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    pending = backups / transaction / "pending"
-    lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
-    for _ in range(300):
-        if pending.exists() and not lock.exists(): break
-        time.sleep(0.02)
-    assert pending.exists() and not lock.exists()
-    run_router(env, "confirm", transaction)
-    stdout, stderr = process.communicate(timeout=5)
-    assert process.returncode == 0, stderr
-    assert "https-dns-proxy stop returned nonzero; verifying listeners stopped" in stdout
-    assert (backups / transaction / "state").read_text().strip() == "confirmed"
-
-
-def test_https_dns_proxy_nonzero_restart_is_accepted_when_all_listeners_are_ready(router):
-    root, _, backups, _, env = router
-    _, transaction = prepare(env)
-    fail = root / "https-restart-fail"
-    fail.touch()
-    env["SERVICE_FAIL_ONCE"] = str(fail)
-    env["SERVICE_FAIL_NAME"] = "https-dns-proxy-init"
-    env["SERVICE_FAIL_ACTION"] = "restart"
-    process = subprocess.Popen(
-        [str(REPO / "router-config.sh"), "apply", transaction], env=env,
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    pending = backups / transaction / "pending"
-    lock = Path(env["ROUTER_CONFIG_LOCK_DIR"])
-    for _ in range(300):
-        if pending.exists() and not lock.exists(): break
-        time.sleep(0.02)
-    assert pending.exists() and not lock.exists()
-    run_router(env, "confirm", transaction)
-    stdout, stderr = process.communicate(timeout=5)
-    assert process.returncode == 0, stderr
-    assert "https-dns-proxy restart returned nonzero; verifying listeners" in stdout
-    assert (backups / transaction / "state").read_text().strip() == "confirmed"
+    (Path(env["ROUTER_CONFIG_PROC_NET_DIR"]) / "tcp").write_text("")
+    result = run_router(env, "apply", transaction, check=False)
+    assert result.returncode != 0
+    assert "service reload failed at adguardhome-listeners; backups restored" in result.stderr
+    assert (config / "network").read_text() == original
+    assert (backups / transaction / "state").read_text().strip() == "rolledback"
 
 
 @pytest.mark.parametrize(("service_name", "action", "failure_label"), [
@@ -1352,15 +1288,14 @@ def test_https_dns_proxy_nonzero_restart_is_accepted_when_all_listeners_are_read
     ("uhttpd-init", "restart", "uhttpd"),
     ("dropbear-init", "restart", "dropbear"),
     ("chronyd-init", "restart", "chronyd"),
-    ("https-dns-proxy-init", "restart", "https-dns-proxy"),
     ("dnsmasq-init", "restart", "dnsmasq"),
-    ("adblock-init", "restart", "adblock-fast"),
+    ("adguardhome-init", "restart", "adguardhome"),
 ])
 def test_each_coordinated_service_failure_is_named_and_restores_every_file(
     router, service_name, action, failure_label
 ):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "adguardhome", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     chrony_conf = Path(env["ROUTER_CONFIG_CHRONY_CONF"])
     original_chrony_conf = chrony_conf.read_text()
@@ -1373,13 +1308,6 @@ def test_each_coordinated_service_failure_is_named_and_restores_every_file(
         env["SERVICE_FAIL_ONCE"] = str(fail)
         env["SERVICE_FAIL_NAME"] = service_name
         env["SERVICE_FAIL_ACTION"] = action
-    if service_name == "https-dns-proxy-init":
-        proc_net = Path(env["ROUTER_CONFIG_PROC_NET_DIR"])
-        backup_only = "".join(
-            f"   {index}: 0100007F:{port:04X} 00000000:0000 0A\n"
-            for index, port in enumerate((5053, 5054, 5999))
-        )
-        (proc_net / "tcp").write_text(backup_only)
     result = run_router(env, "apply", transaction, check=False)
     assert result.returncode != 0
     assert f"service reload failed at {failure_label}; backups restored" in result.stderr
@@ -1405,7 +1333,7 @@ def test_transaction_tampering_is_rejected(router):
 
 def test_partial_candidate_installation_failure_restores_all_packages(router):
     root, config, backups, _, env = router
-    names = ("network", "firewall", "wireless", "dhcp", "system", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
+    names = ("network", "firewall", "wireless", "dhcp", "system", "adguardhome", "chrony", "uhttpd", "dropbear")
     originals = {name: (config / name).read_text() for name in names}
     modules_conf = Path(env["ROUTER_CONFIG_MODULES_CONF"])
     original_modules = modules_conf.read_text()
@@ -1522,24 +1450,15 @@ def test_missing_or_ambiguous_dnsmasq_is_rejected(router, sections):
     assert not backups.exists()
 
 
-def test_https_dns_proxy_validation_and_forward_mismatch_are_preapply_failures(router):
+def test_adguard_dnsmasq_validation_is_a_preapply_failure(router):
     _, config, backups, overlays, env = router
     original = (config / "network").read_text()
-    with (overlays / "dns-over-https").open("a") as stream:
-        stream.write("\nset https-dns-proxy.quad9.resolver_url='https://example.invalid/dns-query'\n")
+    with (overlays / "adguard-home").open("a") as stream:
+        stream.write("\nset dhcp.dnsmasq.port='55'\n")
     result = run_router(env, "prepare", "--recovery-ready", check=False)
-    assert "unexpected https-dns-proxy URL for quad9" in result.stderr
+    assert "dnsmasq must listen on port 54" in result.stderr
     assert (config / "network").read_text() == original
-
-    shutil.rmtree(backups)
-    (overlays / "dns-over-https").write_text(
-        (REPO / "uci/dns-over-https").read_text().replace(
-            "127.0.0.1#5056", "127.0.0.1#5999"
-        )
-    )
-    result = run_router(env, "prepare", "--recovery-ready", check=False)
-    assert "dnsmasq upstreams do not match" in result.stderr
-    assert (config / "network").read_text() == original
+    assert not any(backups.glob("*/state"))
 
 
 @pytest.mark.parametrize(("mutation", "error"), [
@@ -1623,28 +1542,28 @@ def test_admin_access_validation_rejects_wildcard_uhttpd_listen(router):
 
 def test_feature_install_callbacks_only_install_and_enable(router):
     root, config, _, _, env = router
-    names = ("network", "firewall", "dhcp", "https-dns-proxy", "adblock-fast", "chrony", "uhttpd", "dropbear")
+    names = ("network", "firewall", "dhcp", "adguardhome", "chrony", "uhttpd", "dropbear")
     before = {name: (config / name).read_text() for name in names}
     apk_log = root / "apk.log"
     init_log = root / "init.log"
     write_executable(root / "bin" / "apk", f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{apk_log}'\n")
     init = root / "bin" / "init-install"
-    write_executable(init, f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{init_log}'\n")
+    write_executable(init, f'''#!/bin/sh
+[ "${{1-}}" != enabled ] || exit 1
+printf '%s\n' "$*" >> '{init_log}'
+''')
     env["ROUTER_CONFIG_SYSNTPD_INIT"] = str(init)
     env["ROUTER_CONFIG_CHRONYD_INIT"] = str(init)
-    env["ROUTER_CONFIG_HTTPS_DNS_PROXY_INIT"] = str(init)
-    env["ROUTER_CONFIG_ADBLOCK_INIT"] = str(init)
+    env["ROUTER_CONFIG_ADGUARDHOME_INIT"] = str(init)
     run_module(env, "nts.sh", "nts_install")
-    run_module(env, "dns-over-https.sh", "dns_over_https_install")
-    run_module(env, "adblock-fast.sh", "adblock_fast_install")
+    run_module(env, "adguard-home.sh", "adguard_home_install")
     run_module(env, "wireguard.sh", "wireguard_install")
     assert apk_log.read_text().splitlines() == [
         "add chrony-nts",
-        "add https-dns-proxy luci-app-https-dns-proxy",
-        "add adblock-fast luci-app-adblock-fast",
+        "add adguardhome luci-app-adguardhome",
         "add wireguard-tools luci-proto-wireguard",
     ]
-    assert init_log.read_text().splitlines() == ["stop", "disable", "enable", "enable", "enable"]
+    assert init_log.read_text().splitlines() == ["stop", "disable", "enable", "stop", "disable"]
     assert {name: (config / name).read_text() for name in names} == before
 
 
@@ -1662,9 +1581,9 @@ def test_all_package_installation_uses_apk(router):
         for path in [REPO / "setup.sh", *(REPO / "modules").glob("*.sh")]
     )
     assert "op" + "kg" not in project_shell
-    assert "dns" + "crypt" not in project_shell.lower()
+    assert "apk add dns" + "crypt" not in project_shell.lower()
     assert "apk add chrony-nts" in project_shell
-    assert "apk add https-dns-proxy luci-app-https-dns-proxy" in project_shell
+    assert "apk add adguardhome luci-app-adguardhome" in project_shell
     assert "apk add wireguard-tools luci-proto-wireguard" in project_shell
 
 
@@ -1674,8 +1593,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
         'router-config.sh" check-base',
         "base_packages_run",
         "nts_install",
-        "dns_over_https_install",
-        "adblock_fast_install",
+        "adguard_home_install",
         "wireguard_install",
         'router-config.sh\" prepare',
     ]
@@ -1684,7 +1602,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
     for name in (
         "base-packages", "network", "firewall", "wireless", "admin-access",
         "attendedsysupgrade", "nts",
-        "dns-over-https", "adblock-fast", "wireguard",
+        "adguard-home", "wireguard",
     ):
         assert f"modules/{name}.sh" in source
     assert "SCRIPT_DIR=$(CDPATH=" in source
@@ -1692,8 +1610,7 @@ def test_setup_declares_fixed_module_order_and_all_members():
     assert "ROUTER_CONFIG_" + "BUNDLE" not in source
     assert "adblock" + "-lean" not in source
     assert "--recovery-ready" in source
-    assert "dns_over_https_run" not in source
-    assert "adblock_fast_run" not in source
+    assert "adguard_home_run" not in source
     assert "wireguard_run" not in source
     assert "nts_run" not in source
     assert "admin_access_run" not in source
@@ -1709,6 +1626,6 @@ def test_setup_declares_fixed_module_order_and_all_members():
     assert transaction_source.index('"$DROPBEAR_INIT" restart') < transaction_source.index(
         '"$CHRONYD_INIT" restart'
     )
-    assert transaction_source.index('"$HTTPS_DNS_PROXY_INIT" restart') < transaction_source.index(
-        '"$DNSMASQ_INIT" restart'
+    assert transaction_source.index('"$DNSMASQ_INIT" restart') < transaction_source.index(
+        '"$ADGUARDHOME_INIT" restart'
     )
