@@ -32,6 +32,12 @@ accordingly. They are a single mutual-trust domain. Physical Pixel clients also
 retain unrestricted Layer-2 communication because Wi-Fi client isolation is
 disabled on Pixel.
 
+Every managed VLAN rejects routed TCP/UDP port 853 traffic and UDP port 784 or
+8853 traffic regardless of destination zone. This prevents routed access to
+DoT and standard or alternate/legacy DoQ resolvers on WAN, another VLAN, or a
+WireGuard route. It cannot filter same-segment Layer-2 traffic that does not
+traverse the router.
+
 Zone input policy alone is not enough for LuCI/SSH. Stock uhttpd and Dropbear
 listen on all addresses, including restricted-VLAN gateways. The
 [admin access](admin-access.md) module binds those listeners to Pixel

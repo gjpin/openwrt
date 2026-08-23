@@ -93,8 +93,9 @@ over direct remote replacement of live config files.
   Keep `VPN_ADDR` off the WAN and managed VLAN subnets.
 - Keep VLAN IDs, bridge-VLAN ports, subnets, wireless `network` values,
   firewall zones, forwarding, and DNS divert rules consistent as one change.
-  Keep per-VLAN reject-to-WAN rules for DoT (`dest_port=853`, `tcp udp`) and
-  DoQ (`dest_port=8853`, `udp`) in the encrypted-DNS overlay
+  Keep per-VLAN reject-to-any-routed-destination rules for DoT and standard
+  DoQ (`dest_port=853`, `tcp udp`) plus alternate/legacy DoQ
+  (`dest_port=784` and `8853`, `udp`) in the encrypted-DNS overlay
   (`uci/adguard-home`).
 - Every VLAN must have an explicit DHCP decision. Managed pools live in
   `uci/network`; preserve named sections and documented ranges.

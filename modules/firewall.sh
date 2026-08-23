@@ -161,6 +161,27 @@ firewall_module_stage() {
     uci -q -c "$candidate_dir" commit firewall || die 'failed to serialize flow offloading candidate'
 }
 
+firewall_validate_dns_reject() {
+    firewall_dns_config_dir=$1
+    firewall_dns_rule=$2
+    firewall_dns_source=$3
+    firewall_dns_port=$4
+    firewall_dns_proto=$5
+    firewall_dns_label=$6
+    [ "$(uci_get "$firewall_dns_config_dir" "firewall.$firewall_dns_rule")" = rule ] ||
+        die "missing $firewall_dns_label rejection for $firewall_dns_source"
+    [ "$(uci_get "$firewall_dns_config_dir" "firewall.$firewall_dns_rule.src")" = "$firewall_dns_source" ] ||
+        die "$firewall_dns_label rejection has an unexpected source for $firewall_dns_source"
+    [ "$(uci_get "$firewall_dns_config_dir" "firewall.$firewall_dns_rule.dest")" = '*' ] ||
+        die "$firewall_dns_label rejection must cover every routed destination for $firewall_dns_source"
+    [ "$(uci_get "$firewall_dns_config_dir" "firewall.$firewall_dns_rule.dest_port")" = "$firewall_dns_port" ] ||
+        die "$firewall_dns_label rejection has an unexpected port for $firewall_dns_source"
+    [ "$(uci_get "$firewall_dns_config_dir" "firewall.$firewall_dns_rule.proto")" = "$firewall_dns_proto" ] ||
+        die "$firewall_dns_label rejection has an unexpected protocol for $firewall_dns_source"
+    [ "$(uci_get "$firewall_dns_config_dir" "firewall.$firewall_dns_rule.target")" = REJECT ] ||
+        die "$firewall_dns_label rejection has an unexpected target for $firewall_dns_source"
+}
+
 firewall_module_validate() {
     candidate_dir=$1
     [ "$(uci_get "$candidate_dir" firewall.defaults)" = defaults ] || die 'candidate lacks named firewall defaults'
@@ -176,10 +197,12 @@ firewall_module_validate() {
         [ "$(uci_get "$candidate_dir" "firewall.$section_name")" = zone ] || die "missing firewall.$section_name"
         [ "$(uci_get "$candidate_dir" "firewall.divert_dns_$section_name.src")" = "$section_name" ] ||
             die "missing DNS interception for $section_name"
-        [ "$(uci_get "$candidate_dir" "firewall.reject_dot_$section_name.src")" = "$section_name" ] ||
-            die "missing DoT rejection for $section_name"
-        [ "$(uci_get "$candidate_dir" "firewall.reject_doq_$section_name.src")" = "$section_name" ] ||
-            die "missing DoQ rejection for $section_name"
+        firewall_validate_dns_reject "$candidate_dir" "reject_dot_$section_name" \
+            "$section_name" 853 'tcp udp' 'DoT/standard DoQ'
+        firewall_validate_dns_reject "$candidate_dir" "reject_doq_$section_name" \
+            "$section_name" 8853 udp 'alternate DoQ'
+        firewall_validate_dns_reject "$candidate_dir" "reject_doq_legacy_$section_name" \
+            "$section_name" 784 udp 'legacy DoQ'
     done
     [ "$(uci_get "$candidate_dir" firewall.pixel.forward)" = ACCEPT ] ||
         die 'Pixel zone must accept intra-zone forwarding'

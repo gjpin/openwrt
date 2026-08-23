@@ -595,6 +595,14 @@ for net in pixel pixelguest pixeliot pixelthings; do
     uci -q get "firewall.divert_dns_$net.src" | grep -qx "$net" || fail "missing DNS interception for $net"
     uci -q get "firewall.reject_dot_$net.src" | grep -qx "$net" || fail "missing DoT rejection for $net"
     uci -q get "firewall.reject_doq_$net.src" | grep -qx "$net" || fail "missing DoQ rejection for $net"
+    [ "$(uci -q get "firewall.reject_dot_$net.dest")" = '*' ] || fail "DoT rejection is not destination-independent for $net"
+    [ "$(uci -q get "firewall.reject_dot_$net.dest_port")" = 853 ] || fail "invalid DoT/standard DoQ port for $net"
+    [ "$(uci -q get "firewall.reject_dot_$net.proto")" = 'tcp udp' ] || fail "invalid DoT/standard DoQ protocols for $net"
+    [ "$(uci -q get "firewall.reject_doq_$net.dest")" = '*' ] || fail "alternate DoQ rejection is not destination-independent for $net"
+    [ "$(uci -q get "firewall.reject_doq_$net.dest_port")" = 8853 ] || fail "invalid alternate DoQ port for $net"
+    [ "$(uci -q get "firewall.reject_doq_legacy_$net.src")" = "$net" ] || fail "missing legacy DoQ rejection for $net"
+    [ "$(uci -q get "firewall.reject_doq_legacy_$net.dest")" = '*' ] || fail "legacy DoQ rejection is not destination-independent for $net"
+    [ "$(uci -q get "firewall.reject_doq_legacy_$net.dest_port")" = 784 ] || fail "invalid legacy DoQ port for $net"
 done
 uci -q get firewall.pixel.forward | grep -qx ACCEPT ||
     fail 'Pixel zone does not accept intra-zone forwarding'
@@ -1155,6 +1163,37 @@ if [ "$doq_after" -le "$doq_before" ]; then
         cat /tmp/vm-test-doq-probe || :
     } >/tmp/vm-test-failure-detail 2>&1
     fail 'DoQ rejection counter did not increase'
+fi
+# Count Guest UDP/784 forward rejects for legacy DoQ deployments.
+guest_doq_legacy_counter() {
+    nft list chain inet fw4 forward_pixelguest 2>/dev/null |
+        sed -n 's/.*udp dport 784 counter packets \([0-9][0-9]*\).*/\1/p' |
+        awk '{ total += $1 } END { print total + 0 }'
+}
+doq_legacy_before=$(guest_doq_legacy_counter)
+doq_legacy_rule_count=$(
+    nft list chain inet fw4 forward_pixelguest 2>/dev/null |
+        grep -c 'udp dport 784' || :
+)
+[ "$doq_legacy_rule_count" -ge 1 ] || fail 'legacy DoQ rule has no nftables counter'
+ip netns exec guest dig +time=1 +tries=1 \
+    @198.18.0.2 -p 784 vm.test A >/tmp/vm-test-doq-legacy-probe 2>&1 || :
+doq_legacy_after=$(guest_doq_legacy_counter)
+if [ "$doq_legacy_after" -le "$doq_legacy_before" ]; then
+    {
+        printf 'Guest UDP/784 reject packets before: %s\n' "$doq_legacy_before"
+        printf 'Guest UDP/784 reject packets after: %s\n' "$doq_legacy_after"
+        printf '%s\n' '--- PixelGuest forward legacy DoQ nftables rules ---'
+        nft list chain inet fw4 forward_pixelguest |
+            sed -n '/udp dport 784/p' || :
+        printf '%s\n' '--- WAN status ---'
+        ifstatus wan || :
+        printf '%s\n' '--- Guest routes ---'
+        ip -n guest route || :
+        printf '%s\n' '--- legacy DoQ probe output ---'
+        cat /tmp/vm-test-doq-legacy-probe || :
+    } >/tmp/vm-test-failure-detail 2>&1
+    fail 'legacy DoQ rejection counter did not increase'
 fi
 printf '%s\n' "$preshared" >/tmp/client-psk
 chmod 600 /tmp/client-psk

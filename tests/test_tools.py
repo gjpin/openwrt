@@ -287,6 +287,11 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
         "    @198.18.0.2 -p 8853",
         dot_probe,
     )
+    doq_legacy_probe = source.index(
+        "ip netns exec guest dig +time=1 +tries=1 \\\n"
+        "    @198.18.0.2 -p 784",
+        doq_probe,
+    )
     assert (
         network_restart
         < wan_ready
@@ -295,11 +300,13 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
         < firewall_reload
         < dot_probe
         < doq_probe
+        < doq_legacy_probe
     )
     assert "ip netns exec guest busybox nc" not in source
     assert "uci -q delete network.wan.gateway" in source
     assert "guest_dot_counter() {" in source
     assert "guest_doq_counter() {" in source
+    assert "guest_doq_legacy_counter() {" in source
     assert "nft list chain inet fw4 forward_pixelguest" in source
     assert "Guest TCP/853 reject packets before:" in source
     assert "Guest TCP/853 reject packets after:" in source
@@ -307,8 +314,12 @@ def test_vm_guest_synchronizes_static_wan_before_dot_probe():
     assert "Guest UDP/8853 reject packets before:" in source
     assert "Guest UDP/8853 reject packets after:" in source
     assert "--- DoQ probe output ---" in source
+    assert "Guest UDP/784 reject packets before:" in source
+    assert "Guest UDP/784 reject packets after:" in source
+    assert "--- legacy DoQ probe output ---" in source
     assert '@198.18.0.2 -p 8853' in source
-    assert "missing DoQ rejection for $net" in source
+    assert '@198.18.0.2 -p 784' in source
+    assert "missing legacy DoQ rejection for $net" in source
 
 
 def test_vm_guest_blocks_restricted_clients_from_isp_transit_before_wan_swap():
