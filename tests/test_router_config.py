@@ -466,6 +466,27 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert firewall["pixel"]["forward"] == "ACCEPT"
     for restricted_zone in ("pixelguest", "pixeliot", "pixelthings"):
         assert firewall[restricted_zone]["forward"] == "REJECT"
+    for network, label in (
+        ("pixel", "Pixel"),
+        ("pixelguest", "PixelGuest"),
+        ("pixeliot", "PixelIoT"),
+        ("pixelthings", "PixelThings"),
+    ):
+        assert firewall[f"reject_dot_{network}"] == {
+            ".type": "rule", "name": f"{label}-Reject-DoT", "src": network,
+            "dest": "*", "dest_port": "853", "proto": "tcp udp",
+            "target": "REJECT",
+        }
+        assert firewall[f"reject_doq_{network}"] == {
+            ".type": "rule", "name": f"{label}-Reject-DoQ", "src": network,
+            "dest": "*", "dest_port": "8853", "proto": "udp",
+            "target": "REJECT",
+        }
+        assert firewall[f"reject_doq_legacy_{network}"] == {
+            ".type": "rule", "name": f"{label}-Reject-DoQ-Legacy",
+            "src": network, "dest": "*", "dest_port": "784",
+            "proto": "udp", "target": "REJECT",
+        }
     assert firewall["pixeliot_dhcp_reply"] == {
         ".type": "rule", "name": "PixelIoT-DHCP-Reply", "dest": "pixeliot",
         "src_port": "67", "dest_port": "68", "proto": "udp",
@@ -1500,6 +1521,34 @@ def test_adguard_dnsmasq_validation_is_a_preapply_failure(router):
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert "dnsmasq must listen on port 54" in result.stderr
     assert (config / "network").read_text() == original
+    assert not any(backups.glob("*/state"))
+
+
+@pytest.mark.parametrize(("mutation", "error"), [
+    (
+        "set firewall.reject_dot_pixel.dest='wan'",
+        "DoT/standard DoQ rejection must cover every routed destination for pixel",
+    ),
+    (
+        "set firewall.reject_doq_pixelguest.dest_port='8854'",
+        "alternate DoQ rejection has an unexpected port for pixelguest",
+    ),
+    (
+        "set firewall.reject_doq_legacy_pixelthings='redirect'",
+        "missing legacy DoQ rejection for pixelthings",
+    ),
+])
+def test_encrypted_dns_rejection_validation_is_a_preapply_failure(
+    router, mutation, error
+):
+    _, config, backups, overlays, env = router
+    original = (config / "firewall").read_text()
+    with (overlays / "adguard-home").open("a") as stream:
+        stream.write(f"\n{mutation}\n")
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert error in result.stderr
+    assert (config / "firewall").read_text() == original
     assert not any(backups.glob("*/state"))
 
 
