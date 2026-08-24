@@ -523,7 +523,7 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     ):
         assert adguard_yaml.count(upstream) == 1
     assert adguard_yaml.count("  interval: 7d\n") == 2
-    assert adguard_yaml.count("- enabled: true\n") == 22
+    assert adguard_yaml.count("- enabled: true\n") == 26
     assert "  name: AdGuard DNS filter\n" in adguard_yaml
     assert "  name: AdAway Default Blocklist\n" in adguard_yaml
     assert "  name: HaGeZi DNS Rebind Protection\n" in adguard_yaml
@@ -578,7 +578,9 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         "Smart TV", "HaGeZi - LG webOS", "Smart TV blocklist",
         "Block List Project - Smart TV", "Perflyst - Android tracking",
         "Divested - LG", "Divested - Mobile", "GameIndustry - Gaming hosts",
-        "AdGuard CNAME trackers", "CERT Polska",
+        "AdGuard CNAME trackers", "CERT Polska", "HaGeZi - Apple native tracking",
+        "HaGeZi - Windows/Office native tracking", "HaGeZi - TikTok native tracking",
+        "HaGeZi - Threat Intelligence Feeds",
     } <= {
         line.removeprefix("  name: ")
         for line in adguard_yaml.splitlines()

@@ -355,6 +355,22 @@ filters:
   url: https://hole.cert.pl/domains/v2/domains.txt
   name: CERT Polska
   id: 22
+- enabled: true
+  url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.apple.txt
+  name: HaGeZi - Apple native tracking
+  id: 23
+- enabled: true
+  url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.winoffice.txt
+  name: HaGeZi - Windows/Office native tracking
+  id: 24
+- enabled: true
+  url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.tiktok.txt
+  name: HaGeZi - TikTok native tracking
+  id: 25
+- enabled: true
+  url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.txt
+  name: HaGeZi - Threat Intelligence Feeds
+  id: 26
 whitelist_filters: []
 @DNS_REBIND_RULE@
 clients:
@@ -458,8 +474,8 @@ adguard_home_validate() {
     done
     grep -Fxc '  name: AdAway Default Blocklist' "$config_file" >/dev/null ||
         die 'AdAway Default Blocklist is missing from AdGuard Home'
-    [ "$(grep -Fxc -- '- enabled: true' "$config_file")" = 22 ] ||
-        die 'AdGuard Home must contain exactly 22 enabled filters'
+    [ "$(grep -Fxc -- '- enabled: true' "$config_file")" = 26 ] ||
+        die 'AdGuard Home must contain exactly 26 enabled filters'
     [ "$(grep -Fxc "  - $ADGUARD_WIREGUARD_BIND_HOST" "$config_file")" = 1 ] ||
         die 'AdGuard Home must bind DNS to the WireGuard server address'
     grep -Fqx '  blocking_mode: nxdomain' "$config_file" ||

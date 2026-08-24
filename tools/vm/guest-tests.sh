@@ -530,8 +530,8 @@ enabled_filter_count=$(awk '
     in_filters && /^[[:space:]]*-?[[:space:]]*enabled:[[:space:]]*true[[:space:]]*$/ { count++ }
     END { print count + 0 }
 ' /etc/adguardhome/adguardhome.yaml)
-[ "$enabled_filter_count" = 22 ] ||
-    fail 'AdGuard Home does not contain exactly 22 enabled filters'
+[ "$enabled_filter_count" = 26 ] ||
+    fail 'AdGuard Home does not contain exactly 26 enabled filters'
 grep -Eq '^[[:space:]]*name:[[:space:]]*AdGuard DNS filter[[:space:]]*$' \
     /etc/adguardhome/adguardhome.yaml ||
     fail 'AdGuard DNS filter is not enabled'
@@ -763,7 +763,7 @@ if [ "$profile" = live ]; then
     while [ "$filter_attempt" -lt 90 ]; do
         filter_attempt=$((filter_attempt + 1))
         filter_count=$(find /opt/adguardhome/data/filters -type f -name '*.txt' 2>/dev/null | wc -l)
-        [ "$filter_count" -ge 22 ] && {
+        [ "$filter_count" -ge 26 ] && {
             filter_ready=1
             break
         }

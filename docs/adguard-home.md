@@ -32,9 +32,10 @@ all managed VLAN TCP/UDP port-53 traffic to the router. Direct DoT on TCP/UDP
 853 and DoQ on UDP 8853 remain rejected.
 
 AdGuard DNS, AdAway Default Blocklist, and HaGeZi DNS Rebind Protection are
-enabled. The 19 non-duplicate adblock-fast sources are also enabled with fixed
-IDs. The former direct AdGuard DNS URL is omitted because it duplicates the
-built-in AdGuard DNS filter. Filters refresh every 24 hours. When optional
+enabled. The 23 non-duplicate adblock-fast sources are also enabled with fixed
+IDs, including HaGeZi's Apple, Windows/Office, TikTok, and Threat Intelligence
+Feeds lists. The former direct AdGuard DNS URL is omitted because it duplicates
+the built-in AdGuard DNS filter. Filters refresh every 24 hours. When optional
 `DNS_REBIND_DOMAIN` is set, the rendered user rule `@@||DOMAIN^` permits private
 answers for that apex and its subdomains; the input is normalized to lowercase.
 Blocked responses use `NXDOMAIN`, including private answers rejected by the
