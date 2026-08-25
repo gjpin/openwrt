@@ -41,6 +41,10 @@ the built-in AdGuard DNS filter. Filters refresh every 24 hours. When optional
 answers for that apex and its subdomains; the input is normalized to lowercase.
 Blocked responses use `NXDOMAIN`, including private answers rejected by the
 HaGeZi DNS Rebind Protection filter, instead of returning `0.0.0.0` or `::`.
+The default custom filtering rules whitelist Steam connectivity checks and
+Google/YouTube client and suggestion endpoints that may otherwise be blocked
+by the enabled tracking and DNS bypass filters. An optional
+`DNS_REBIND_DOMAIN` exception is added after these defaults.
 
 Query logging is file-backed with a 5,000-entry memory buffer. Query-log and
 statistics intervals are both `7d`. Data is stored persistently in

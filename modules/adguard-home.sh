@@ -139,11 +139,21 @@ adguard_home_render_config() {
             print "  password: \047" password_hash "\047"
             next
         }
-        $0 == "@DNS_REBIND_RULE@" {
-            if (rebind_domain == "") {
-                print "user_rules: []"
-            } else {
-                print "user_rules:"
+        $0 == "@USER_RULES@" {
+            print "user_rules:"
+            print "- \047@@||steamconnecttest.com^\047"
+            print "- \047@@||ipv6check-udp.steamserver.net^\047"
+            print "- \047@@||ipv6check-http.steamserver.net^\047"
+            print "- \047@@||suggestqueries*.youtube.com^\047"
+            print "- \047@@||suggestqueries.google.com^\047"
+            print "- \047@@||clients1.google.com^\047"
+            print "- \047@@||clients2.google.com^\047"
+            print "- \047@@||clients3.google.com^\047"
+            print "- \047@@||clients.l.google.com^\047"
+            print "- \047@@||script.google.com^\047"
+            print "- \047@@||script.googleusercontent.com^\047"
+            print "- \047@@||doc-*-docstext.googleusercontent.com^\047"
+            if (rebind_domain != "") {
                 print "- \047@@||" rebind_domain "^\047"
             }
             next
@@ -372,7 +382,7 @@ filters:
   name: HaGeZi - Threat Intelligence Feeds
   id: 26
 whitelist_filters: []
-@DNS_REBIND_RULE@
+@USER_RULES@
 clients:
   persistent: []
   runtime_sources:
