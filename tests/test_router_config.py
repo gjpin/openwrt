@@ -13,6 +13,22 @@ import pytest
 REPO = Path(__file__).parents[1]
 
 
+DEFAULT_ADGUARD_USER_RULES = (
+    "@@||steamconnecttest.com^",
+    "@@||ipv6check-udp.steamserver.net^",
+    "@@||ipv6check-http.steamserver.net^",
+    "@@||suggestqueries*.youtube.com^",
+    "@@||suggestqueries.google.com^",
+    "@@||clients1.google.com^",
+    "@@||clients2.google.com^",
+    "@@||clients3.google.com^",
+    "@@||clients.l.google.com^",
+    "@@||script.google.com^",
+    "@@||script.googleusercontent.com^",
+    "@@||doc-*-docstext.googleusercontent.com^",
+)
+
+
 UCI_STUB = r'''#!/usr/bin/env python3
 import json, os, shlex, sys
 
@@ -546,6 +562,8 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         assert adguard_yaml.count(upstream) == 1
     assert adguard_yaml.count("  interval: 7d\n") == 2
     assert adguard_yaml.count("- enabled: true\n") == 26
+    for user_rule in DEFAULT_ADGUARD_USER_RULES:
+        assert adguard_yaml.count(f"- '{user_rule}'\n") == 1
     assert "  name: AdGuard DNS filter\n" in adguard_yaml
     assert "  name: AdAway Default Blocklist\n" in adguard_yaml
     assert "  name: HaGeZi DNS Rebind Protection\n" in adguard_yaml
@@ -982,7 +1000,9 @@ def test_rebind_domain_unset_or_empty_renders_no_adguard_exception(
     candidate = json.loads((backups / transaction / "candidate" / "dhcp").read_text())
     assert "rebind_domain" not in candidate["dnsmasq"]
     yaml = (backups / transaction / "candidate" / "adguardhome.yaml").read_text()
-    assert "user_rules: []\n" in yaml
+    assert "user_rules:\n" in yaml
+    for user_rule in DEFAULT_ADGUARD_USER_RULES:
+        assert yaml.count(f"- '{user_rule}'\n") == 1
 
 
 def test_rebind_domain_is_normalized_and_idempotent(router):
@@ -991,6 +1011,8 @@ def test_rebind_domain_is_normalized_and_idempotent(router):
 
     _, first = prepare(env)
     first_yaml = (backups / first / "candidate" / "adguardhome.yaml").read_text()
+    for user_rule in DEFAULT_ADGUARD_USER_RULES:
+        assert first_yaml.count(f"- '{user_rule}'\n") == 1
     assert first_yaml.count("- '@@||mydomain.com^'") == 1
 
     (config / "adguardhome").write_text(

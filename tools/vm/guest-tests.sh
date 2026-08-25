@@ -519,6 +519,22 @@ done
     fail 'installed AdGuard Home configuration is invalid'
 grep -Fq -- '@@||vm.example^' /etc/adguardhome/adguardhome.yaml ||
     fail 'AdGuard Home DNS rebind exception is missing'
+for adguard_user_rule in \
+    '@@||steamconnecttest.com^' \
+    '@@||ipv6check-udp.steamserver.net^' \
+    '@@||ipv6check-http.steamserver.net^' \
+    '@@||suggestqueries*.youtube.com^' \
+    '@@||suggestqueries.google.com^' \
+    '@@||clients1.google.com^' \
+    '@@||clients2.google.com^' \
+    '@@||clients3.google.com^' \
+    '@@||clients.l.google.com^' \
+    '@@||script.google.com^' \
+    '@@||script.googleusercontent.com^' \
+    '@@||doc-*-docstext.googleusercontent.com^'; do
+    grep -Fq -- "'$adguard_user_rule'" /etc/adguardhome/adguardhome.yaml ||
+        fail "AdGuard Home default whitelist rule is missing: $adguard_user_rule"
+done
 grep -Eq "^[[:space:]]*-[[:space:]]*${VPN_ADDR%/*}[[:space:]]*$" \
     /etc/adguardhome/adguardhome.yaml ||
     fail 'AdGuard Home WireGuard DNS listener is missing'
