@@ -50,6 +50,8 @@ equivalent to:
 uci add_list wireless.radio1.hostapd_options='he_twt_responder=0'
 ```
 
+The transaction removes an existing copy before adding the option so repeated
+prepares do not create duplicate list entries.
 The same transaction also manages `/etc/modules.conf` for Wireless Ethernet
 Dispatch (WED). The candidate ensures exactly one line:
 
