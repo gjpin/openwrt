@@ -66,6 +66,11 @@ wireless_module_stage() {
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.country=$COUNTRY"
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.channel=$CHANNEL"
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.htmode=HE80"
+    uci -q -c "$candidate_dir" del_list \
+        "wireless.$WIRELESS_5G_DEVICE.hostapd_options=he_twt_responder=0" 2>/dev/null || :
+    uci -q -c "$candidate_dir" add_list \
+        "wireless.$WIRELESS_5G_DEVICE.hostapd_options=he_twt_responder=0" ||
+        die 'failed to set the 5 GHz TWT responder hostapd option'
     uci -q -c "$candidate_dir" commit wireless || die 'failed to serialize wireless candidate'
     wireless_stage_wed "$candidate_dir/modules.conf"
 }
@@ -112,6 +117,11 @@ wireless_module_validate() {
         die "wireless.$WIRELESS_5G_DEVICE.channel is not set to CHANNEL"
     [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.htmode")" = HE80 ] ||
         die "wireless.$WIRELESS_5G_DEVICE.htmode is not set to HE80"
+    hostapd_options=$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.hostapd_options" 2>/dev/null || :)
+    case " $hostapd_options " in
+        *' he_twt_responder=0 '*) ;;
+        *) die "wireless.$WIRELESS_5G_DEVICE.hostapd_options lacks he_twt_responder=0" ;;
+    esac
     modules_file=$candidate_dir/modules.conf
     [ -f "$modules_file" ] || die 'candidate lacks modules.conf'
     grep -qx 'options mt7915e wed_enable=Y' "$modules_file" ||
