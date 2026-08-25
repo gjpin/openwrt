@@ -460,6 +460,7 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["radio0"]["htmode"] == "HE80"
     assert wireless["radio1"].get("channel") == "auto"
     assert "htmode" not in wireless["radio1"]
+    assert wireless["radio1"]["hostapd_options"] == ["he_twt_responder=0"]
     firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
     assert firewall["defaults"]["flow_offloading"] == "1"
     assert firewall["defaults"]["flow_offloading_hw"] == "1"
@@ -678,6 +679,10 @@ def test_repeated_prepare_is_idempotent(router):
     second_firewall = json.loads(
         (backups / second / "candidate" / "firewall").read_text()
     )
+    second_wireless = json.loads(
+        (backups / second / "candidate" / "wireless").read_text()
+    )
+    assert second_wireless["radio1"]["hostapd_options"] == ["he_twt_responder=0"]
     for network in ("pixelguest", "pixelthings", "pixeliot"):
         section = f"reject_isp_transit_{network}"
         assert second_firewall[section] == first_firewall[section]
@@ -915,6 +920,7 @@ def test_wireless_assignment_follows_bands_not_radio_numbers(router):
     assert candidate["pixeliot"]["device"] == "radio0"
     assert candidate["radio1"]["channel"] == "36"
     assert candidate["radio1"]["htmode"] == "HE80"
+    assert candidate["radio0"]["hostapd_options"] == ["he_twt_responder=0"]
 
 
 def test_prepare_applies_custom_channel_with_he80(router):

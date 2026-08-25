@@ -42,6 +42,16 @@ The module requires exactly one existing `wifi-device` with `band '2g'` and one
 with `band '5g'`. It discovers their section names rather than assuming radio
 numbering.
 
+The 2.4 GHz radio is configured with the hostapd option
+`he_twt_responder=0`. On the GL-MT6000 stock layout this is equivalent to:
+
+```
+uci add_list wireless.radio1.hostapd_options='he_twt_responder=0'
+```
+
+The transaction removes an existing copy before adding the option so repeated
+prepares do not create duplicate list entries.
+
 The same transaction also manages `/etc/modules.conf` for Wireless Ethernet
 Dispatch (WED). The candidate ensures exactly one line:
 
