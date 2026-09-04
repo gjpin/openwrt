@@ -558,9 +558,11 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
         "https://dns.quad9.net/dns-query",
         "https://security.cloudflare-dns.com/dns-query",
         "https://freedns.controld.com/p2",
-        "https://base.dns.mullvad.net/dns-query",
     ):
         assert adguard_yaml.count(upstream) == 1
+    assert "https://base.dns.mullvad.net/dns-query" not in adguard_yaml
+    assert "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt" in adguard_yaml
+    assert "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.txt" not in adguard_yaml
     assert adguard_yaml.count("  interval: 7d\n") == 2
     assert adguard_yaml.count("- enabled: true\n") == 26
     for user_rule in DEFAULT_ADGUARD_USER_RULES:

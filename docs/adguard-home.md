@@ -18,13 +18,12 @@ explicitly advertises its own gateway as DNS. Firewall rules reject client
 access to dnsmasq port 54, including from Pixel and its WireGuard member, so it
 cannot bypass filtering.
 
-The four existing encrypted upstreams are configured directly in AdGuard Home
+The three existing encrypted upstreams are configured directly in AdGuard Home
 in load-balancing mode:
 
 - Quad9
 - Cloudflare Security
 - Control D Ads & Tracking
-- Mullvad Base
 
 Bootstrap DNS uses `9.9.9.11`, `1.1.1.1`, and `8.8.8.8`. AdGuard does not
 provide incoming DoH, DoT, DoQ, or DNSCrypt. Existing firewall redirects force

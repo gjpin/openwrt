@@ -391,8 +391,7 @@ if [ "$profile" = stable ]; then
     for upstream_spec in \
         '9.9.9.9|dns.quad9.net' \
         '1.1.1.2|security.cloudflare-dns.com' \
-        '76.76.2.11|freedns.controld.com' \
-        '194.242.2.4|base.dns.mullvad.net'; do
+        '76.76.2.11|freedns.controld.com'; do
         upstream_address=${upstream_spec%%|*}
         upstream_host=${upstream_spec#*|}
         printf '%s %s\n' "$upstream_address" "$upstream_host" >>/etc/hosts

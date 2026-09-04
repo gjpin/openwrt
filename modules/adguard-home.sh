@@ -204,7 +204,6 @@ dns:
   - https://dns.quad9.net/dns-query
   - https://security.cloudflare-dns.com/dns-query
   - https://freedns.controld.com/p2
-  - https://base.dns.mullvad.net/dns-query
   upstream_dns_file: ""
   bootstrap_dns:
   - 9.9.9.11:53
@@ -378,7 +377,7 @@ filters:
   name: HaGeZi - TikTok native tracking
   id: 25
 - enabled: true
-  url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.txt
+  url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt
   name: HaGeZi - Threat Intelligence Feeds
   id: 26
 whitelist_filters: []
