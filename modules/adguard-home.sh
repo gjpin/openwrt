@@ -144,6 +144,10 @@ adguard_home_render_config() {
             print "- \047@@||steamconnecttest.com^\047"
             print "- \047@@||ipv6check-udp.steamserver.net^\047"
             print "- \047@@||ipv6check-http.steamserver.net^\047"
+            print "- \047@@||lgtvonline.lge.com^\047"
+            print "- \047@@||ipv4.connman.net^\047"
+            print "- \047@@||ipv6.connman.net^\047"
+            print "- \047@@||lgtvsdp.com^\047"
             print "- \047@@||suggestqueries*.youtube.com^\047"
             print "- \047@@||suggestqueries.google.com^\047"
             print "- \047@@||clients1.google.com^\047"
@@ -224,7 +228,7 @@ dns:
   cache_optimistic_answer_ttl: 30s
   cache_optimistic_max_age: 12h
   bogus_nxdomain: []
-  aaaa_disabled: false
+  aaaa_disabled: true
   enable_dnssec: false
   edns_client_subnet:
     enabled: false
@@ -489,6 +493,8 @@ adguard_home_validate() {
         die 'AdGuard Home must bind DNS to the WireGuard server address'
     grep -Fqx '  blocking_mode: nxdomain' "$config_file" ||
         die 'AdGuard Home must return NXDOMAIN for blocked responses'
+    grep -Fqx '  aaaa_disabled: true' "$config_file" ||
+        die 'AdGuard Home must disable AAAA answers on IPv4-only networks'
     [ "$(grep -Fxc '  interval: 7d' "$config_file")" = 2 ] ||
         die 'AdGuard Home query log and statistics retention must both be seven days'
     adguard_binary=${ADGUARDHOME_BIN:-/usr/bin/AdGuardHome}

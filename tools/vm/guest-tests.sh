@@ -522,6 +522,10 @@ for adguard_user_rule in \
     '@@||steamconnecttest.com^' \
     '@@||ipv6check-udp.steamserver.net^' \
     '@@||ipv6check-http.steamserver.net^' \
+    '@@||lgtvonline.lge.com^' \
+    '@@||ipv4.connman.net^' \
+    '@@||ipv6.connman.net^' \
+    '@@||lgtvsdp.com^' \
     '@@||suggestqueries*.youtube.com^' \
     '@@||suggestqueries.google.com^' \
     '@@||clients1.google.com^' \
@@ -539,6 +543,8 @@ grep -Eq "^[[:space:]]*-[[:space:]]*${VPN_ADDR%/*}[[:space:]]*$" \
     fail 'AdGuard Home WireGuard DNS listener is missing'
 grep -Fqx '  blocking_mode: nxdomain' /etc/adguardhome/adguardhome.yaml ||
     fail 'AdGuard Home blocking mode is not NXDOMAIN'
+grep -Fqx '  aaaa_disabled: true' /etc/adguardhome/adguardhome.yaml ||
+    fail 'AdGuard Home AAAA answers are not disabled'
 enabled_filter_count=$(awk '
     /^filters:/ { in_filters = 1; next }
     /^whitelist_filters:/ { in_filters = 0 }

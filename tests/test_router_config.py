@@ -17,6 +17,10 @@ DEFAULT_ADGUARD_USER_RULES = (
     "@@||steamconnecttest.com^",
     "@@||ipv6check-udp.steamserver.net^",
     "@@||ipv6check-http.steamserver.net^",
+    "@@||lgtvonline.lge.com^",
+    "@@||ipv4.connman.net^",
+    "@@||ipv6.connman.net^",
+    "@@||lgtvsdp.com^",
     "@@||suggestqueries*.youtube.com^",
     "@@||suggestqueries.google.com^",
     "@@||clients1.google.com^",
@@ -553,6 +557,7 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert "  - 192.168.11.1\n" in adguard_yaml
     assert "  port: 53\n" in adguard_yaml
     assert "  blocking_mode: nxdomain\n" in adguard_yaml
+    assert "  aaaa_disabled: true\n" in adguard_yaml
     assert "  - '[/lan/]127.0.0.1:54'\n" in adguard_yaml
     for upstream in (
         "https://dns.quad9.net/dns-query",

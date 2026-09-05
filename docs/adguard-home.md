@@ -40,10 +40,17 @@ the built-in AdGuard DNS filter. Filters refresh every 24 hours. When optional
 answers for that apex and its subdomains; the input is normalized to lowercase.
 Blocked responses use `NXDOMAIN`, including private answers rejected by the
 HaGeZi DNS Rebind Protection filter, instead of returning `0.0.0.0` or `::`.
-The default custom filtering rules whitelist Steam connectivity checks and
-Google/YouTube client and suggestion endpoints that may otherwise be blocked
-by the enabled tracking and DNS bypass filters. An optional
-`DNS_REBIND_DOMAIN` exception is added after these defaults.
+AAAA answers are disabled because WAN and the managed VLANs are IPv4-only;
+returning AAAA records makes IPv6-capable clients such as LG webOS retry until
+the v6 attempt times out. The default custom filtering rules whitelist Steam
+connectivity checks, LG webOS online and SDP init hosts, and Google/YouTube
+client and suggestion endpoints that may otherwise be blocked by the enabled
+tracking, Smart TV, and DNS bypass filters. The LG exceptions cover
+`lgtvonline.lge.com`, ConnMan's `ipv4.connman.net` / `ipv6.connman.net` probes,
+and `lgtvsdp.com` (including country SDP hosts such as `us.lgtvsdp.com`). They
+do not allowlist `lgtvcommon.com`, so HaGeZi's LG tracking blocks remain in
+effect. An optional `DNS_REBIND_DOMAIN` exception is added after these
+defaults.
 
 Query logging is file-backed with a 5,000-entry memory buffer. Query-log and
 statistics intervals are both `7d`. Data is stored persistently in
