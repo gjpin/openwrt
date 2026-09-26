@@ -291,7 +291,7 @@ set wireless.radio0.country='US'
 set wireless.radio1='wifi-device'
 set wireless.radio1.type='mac80211'
 set wireless.radio1.band='2g'
-set wireless.radio1.channel='6'
+set wireless.radio1.channel='auto'
 set wireless.radio1.country='US'
 EOF
 uci set "wireless.radio0.phy=$ap_5g_phy"
@@ -409,6 +409,7 @@ export GUEST_WIFI_PASSWORD='vm-guest-password'
 export IOT_WIFI_PASSWORD='vm-iot-password'
 export COUNTRY='US'
 export CHANNEL='36'
+export CHANNEL_2G='6'
 export DNS_REBIND_DOMAIN='VM.Example'
 export ADGUARD_USERNAME='admin'
 # shellcheck disable=SC2016 # Literal bcrypt hash; dollar signs must not expand.
@@ -496,6 +497,15 @@ fw4 check || fail 'fw4 rejected installed configuration'
 [ "$(uci -q get firewall.wan.network)" = wan ] || fail 'WAN zone was not normalized'
 [ "$(uci -q get firewall.defaults.flow_offloading)" = 1 ] || fail 'software flow offloading is not enabled'
 [ "$(uci -q get firewall.defaults.flow_offloading_hw)" = 1 ] || fail 'hardware flow offloading is not enabled'
+[ "$(uci -q get wireless.pixeliot.encryption)" = 'psk2+ccmp' ] ||
+    fail 'PixelIoT is not using WPA2-PSK with CCMP'
+[ "$(uci -q get wireless.pixeliot.ieee80211w)" = '0' ] ||
+    fail 'PixelIoT management frame protection is not disabled'
+# radio1 is the fixture's 2.4 GHz radio; the transaction must pin it for IoT.
+[ "$(uci -q get wireless.radio1.channel)" = '6' ] ||
+    fail '2.4 GHz radio is not on channel 6'
+[ "$(uci -q get wireless.radio1.htmode)" = 'HT20' ] ||
+    fail '2.4 GHz radio is not in 802.11n HT20 mode'
 [ "$(uci -q get attendedsysupgrade.client.login_check_for_upgrades)" = 1 ] ||
     fail 'LuCI login upgrade check is not enabled'
 [ "$(uci -q get dhcp.dnsmasq.port)" = 54 ] || fail 'dnsmasq is not on port 54'
@@ -836,14 +846,17 @@ done
 check_dns_listeners 'after early-boot recovery'
 check_ap_interfaces 'after early-boot recovery'
 
-# Associate one isolated WPA3-SAE hwsim station with each managed SSID and
-# obtain its lease through the real AP/netifd bridge path.
+# Associate one isolated hwsim station with each managed SSID and obtain its
+# lease through the real AP/netifd bridge path. The 5 GHz SSIDs authenticate
+# with WPA3-SAE; PixelIoT authenticates with WPA2-PSK and CCMP and without
+# management frame protection, matching its legacy IoT device profile.
 wifi_client() {
     client_phy=$1
     client_if=$2
     client_ns=$3
     client_ssid=$4
     client_password=$5
+    client_auth=$6
     ip netns del "$client_ns" 2>/dev/null || :
     ip netns add "$client_ns" || fail "failed to create Wi-Fi namespace $client_ns"
     ip -n "$client_ns" link set lo up || fail "failed to enable loopback in $client_ns"
@@ -852,7 +865,19 @@ wifi_client() {
     ip netns exec "$client_ns" \
         iw phy "$client_phy" interface add "$client_if" type managed ||
         fail "failed to create $client_if from $client_phy in $client_ns"
-    cat >"/tmp/$client_ns.conf" <<EOF
+    if [ "$client_auth" = wpa2 ]; then
+        cat >"/tmp/$client_ns.conf" <<EOF
+network={
+    ssid="$client_ssid"
+    psk="$client_password"
+    key_mgmt=WPA-PSK
+    proto=RSN
+    pairwise=CCMP
+    group=CCMP
+}
+EOF
+    else
+        cat >"/tmp/$client_ns.conf" <<EOF
 network={
     ssid="$client_ssid"
     psk="$client_password"
@@ -860,6 +885,7 @@ network={
     ieee80211w=2
 }
 EOF
+    fi
     chmod 600 "/tmp/$client_ns.conf"
     ip netns exec "$client_ns" wpa_supplicant -B -D nl80211 -i "$client_if" -c "/tmp/$client_ns.conf"
     associated=0
@@ -886,14 +912,14 @@ EOF
             printf '%s\n' '--- wireless service log ---'
             logread -e hostapd -e wpa_supplicant
         } >/tmp/vm-test-failure-detail 2>&1 || :
-        fail "WPA3 association failed for $client_ssid"
+        fail "association failed for $client_ssid"
     fi
     ip netns exec "$client_ns" udhcpc -q -n -t 8 -i "$client_if" || fail "Wi-Fi DHCP failed for $client_ssid"
 }
-wifi_client "$pixel_client_phy" wpixel wifi_pixel Pixel "$PIXEL_WIFI_PASSWORD"
-wifi_client "$guest_client_phy" wguest wifi_guest PixelGuest "$GUEST_WIFI_PASSWORD"
-wifi_client "$iot_client_phy" wiot wifi_iot PixelIoT "$IOT_WIFI_PASSWORD"
-wifi_client "$things_client_phy" wthings wifi_things PixelThings "$THINGS_WIFI_PASSWORD"
+wifi_client "$pixel_client_phy" wpixel wifi_pixel Pixel "$PIXEL_WIFI_PASSWORD" sae
+wifi_client "$guest_client_phy" wguest wifi_guest PixelGuest "$GUEST_WIFI_PASSWORD" sae
+wifi_client "$iot_client_phy" wiot wifi_iot PixelIoT "$IOT_WIFI_PASSWORD" wpa2
+wifi_client "$things_client_phy" wthings wifi_things PixelThings "$THINGS_WIFI_PASSWORD" sae
 
 # Move the five link peers into clients. lan1 carries native VLAN 1 plus the
 # three tagged networks; lan2-lan5 are Pixel access links.

@@ -61,6 +61,7 @@ validate_repository() {
 
 validate_inputs() {
     CHANNEL=${CHANNEL:-36}
+    CHANNEL_2G=${CHANNEL_2G:-6}
     adguard_home_inputs_preflight
     for variable_name in \
         PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD \
@@ -79,6 +80,11 @@ validate_inputs() {
     esac
     [ "$CHANNEL" -ge 36 ] 2>/dev/null && [ "$CHANNEL" -le 177 ] 2>/dev/null ||
         die 'CHANNEL must be an integer from 36 through 177'
+    case $CHANNEL_2G in
+        '' | *[!0-9]*) die 'CHANNEL_2G must be an integer from 1 through 13' ;;
+    esac
+    [ "$CHANNEL_2G" -ge 1 ] 2>/dev/null && [ "$CHANNEL_2G" -le 13 ] 2>/dev/null ||
+        die 'CHANNEL_2G must be an integer from 1 through 13'
     case $VPN_IF in
         [A-Za-z_]*) ;;
         *) die 'VPN_IF must begin with a letter or underscore' ;;
@@ -110,7 +116,7 @@ validate_repository
 . "$SCRIPT_DIR/modules/adguard-home.sh"
 validate_inputs
 export PIXEL_WIFI_PASSWORD THINGS_WIFI_PASSWORD GUEST_WIFI_PASSWORD IOT_WIFI_PASSWORD
-export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL DNS_REBIND_DOMAIN
+export VPN_IF VPN_PORT VPN_KEY VPN_ADDR COUNTRY CHANNEL CHANNEL_2G DNS_REBIND_DOMAIN
 export ADGUARD_USERNAME ADGUARD_PASSWORD_HASH ADGUARD_WIREGUARD_BIND_HOST
 
 # Reject unsupported or ambiguous stock configuration before package

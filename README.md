@@ -7,9 +7,11 @@ confirmed within five minutes.
 
 ## Features
 
-- Four WPA3 networks: Pixel, Guest, IoT, and Things
+- Three WPA3 networks (Pixel, Guest, Things) plus a WPA2-PSK 802.11n IoT
+  network for legacy devices, with management frame protection off on IoT only
 - AP client isolation on Guest, IoT, and Things (`isolate=1`)
 - 5 GHz on non-DFS channel `36` at `HE80`
+- 2.4 GHz IoT radio on channel `6` at `HT20` (802.11n)
 - VLAN and DHCP configuration for each network
 - Allowlisted inter-VLAN and internet access
 - LuCI and SSH bound to the Pixel gateway only (`192.168.8.1` / `pixel`)
@@ -83,6 +85,9 @@ must run on the target router as `root`; do not run it on a workstation.
    # Optional: override the 5 GHz primary channel (default 36, non-DFS).
    # Width is always HE80; use only a country-legal channel.
    # export CHANNEL='36'
+   # Optional: override the 2.4 GHz IoT primary channel (default 6).
+   # Width is always HT20 (802.11n); use only a country-legal channel 1-13.
+   # export CHANNEL_2G='6'
    # Optional: permit private DNS answers for this apex and its subdomains.
    # export DNS_REBIND_DOMAIN='mydomain.com'
    export ADGUARD_USERNAME='admin'

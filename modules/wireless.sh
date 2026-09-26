@@ -24,6 +24,12 @@ wireless_module_preflight() {
     esac
     [ "$CHANNEL" -ge 36 ] 2>/dev/null && [ "$CHANNEL" -le 177 ] 2>/dev/null ||
         die 'CHANNEL must be an integer from 36 through 177'
+    CHANNEL_2G=${CHANNEL_2G:-6}
+    case $CHANNEL_2G in
+        '' | *[!0-9]*) die 'CHANNEL_2G must be an integer from 1 through 13' ;;
+    esac
+    [ "$CHANNEL_2G" -ge 1 ] 2>/dev/null && [ "$CHANNEL_2G" -le 13 ] 2>/dev/null ||
+        die 'CHANNEL_2G must be an integer from 1 through 13'
     WIRELESS_2G_DEVICE=
     WIRELESS_5G_DEVICE=
     wifi_devices=$(uci -q -c "$CONFIG_DIR" show wireless |
@@ -66,6 +72,8 @@ wireless_module_stage() {
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.country=$COUNTRY"
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.channel=$CHANNEL"
     uci -q -c "$candidate_dir" set "wireless.$WIRELESS_5G_DEVICE.htmode=HE80"
+    uci -q -c "$candidate_dir" set "wireless.$WIRELESS_2G_DEVICE.channel=$CHANNEL_2G"
+    uci -q -c "$candidate_dir" set "wireless.$WIRELESS_2G_DEVICE.htmode=HT20"
     uci -q -c "$candidate_dir" del_list \
         "wireless.$WIRELESS_5G_DEVICE.hostapd_options=he_twt_responder=0" 2>/dev/null || :
     uci -q -c "$candidate_dir" add_list \
@@ -109,6 +117,10 @@ wireless_module_validate() {
     done
     [ "$(uci_get "$candidate_dir" wireless.pixeliot.device)" = "$WIRELESS_2G_DEVICE" ] ||
         die 'wireless.pixeliot is not assigned to the 2.4 GHz radio'
+    [ "$(uci_get "$candidate_dir" wireless.pixeliot.encryption)" = 'psk2+ccmp' ] ||
+        die 'wireless.pixeliot.encryption is not set to psk2+ccmp'
+    [ "$(uci_get "$candidate_dir" wireless.pixeliot.ieee80211w)" = 0 ] ||
+        die 'wireless.pixeliot.ieee80211w is not set to 0'
     [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_2G_DEVICE.country")" = "$COUNTRY" ] ||
         die "wireless.$WIRELESS_2G_DEVICE.country is not set to COUNTRY"
     [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.country")" = "$COUNTRY" ] ||
@@ -117,6 +129,10 @@ wireless_module_validate() {
         die "wireless.$WIRELESS_5G_DEVICE.channel is not set to CHANNEL"
     [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.htmode")" = HE80 ] ||
         die "wireless.$WIRELESS_5G_DEVICE.htmode is not set to HE80"
+    [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_2G_DEVICE.channel")" = "$CHANNEL_2G" ] ||
+        die "wireless.$WIRELESS_2G_DEVICE.channel is not set to CHANNEL_2G"
+    [ "$(uci_get "$candidate_dir" "wireless.$WIRELESS_2G_DEVICE.htmode")" = HT20 ] ||
+        die "wireless.$WIRELESS_2G_DEVICE.htmode is not set to HT20"
     hostapd_options=$(uci_get "$candidate_dir" "wireless.$WIRELESS_5G_DEVICE.hostapd_options" 2>/dev/null || :)
     case " $hostapd_options " in
         *' he_twt_responder=0 '*) ;;

@@ -178,7 +178,14 @@ over direct remote replacement of live config files.
   is no `VPN_ADDR6`; `DNS_REBIND_DOMAIN` remains optional.
   `COUNTRY` is a required two-letter ISO code with no default. Optional
   `CHANNEL` defaults to `36` (5 GHz non-DFS); the wireless module also forces
-  5 GHz `htmode=HE80`.
+  5 GHz `htmode=HE80`. Optional `CHANNEL_2G` defaults to `6` (2.4 GHz,
+  accepted range 1–13); the module forces 2.4 GHz `htmode=HT20` and leaves
+  `require_mode` unset so 802.11b/g clients can still associate. PixelIoT is
+  the one non-WPA3 SSID: `encryption='psk2+ccmp'` (WPA2-PSK with the pairwise
+  cipher pinned to CCMP, excluding the 256-bit suites) with `ieee80211w='0'`
+  (PMF disabled) for legacy IoT device compatibility; the other three SSIDs
+  remain `sae`. Keep that deliberate security downgrade paired with the IoT
+  zone's restricted firewall policy.
 - Keep operations idempotent. Re-running prepare/apply must not append
   duplicate UCI rules, redirects, list entries, sections, or `modules.conf`
   WED option lines.

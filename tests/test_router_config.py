@@ -474,13 +474,15 @@ def test_prepare_preserves_base_and_is_secret_safe(router):
     assert wireless["pixelthings"]["isolate"] == "1"
     assert wireless["pixelguest"]["isolate"] == "1"
     assert wireless["pixeliot"]["isolate"] == "1"
+    assert wireless["pixeliot"]["encryption"] == "psk2+ccmp"
+    assert wireless["pixeliot"]["ieee80211w"] == "0"
     assert wireless["radio0"]["country"] == "US"
     assert wireless["radio1"]["country"] == "US"
     assert wireless["radio0"]["channel"] == "36"
     assert wireless["radio0"]["htmode"] == "HE80"
     assert wireless["radio0"]["hostapd_options"] == ["he_twt_responder=0"]
-    assert wireless["radio1"].get("channel") == "auto"
-    assert "htmode" not in wireless["radio1"]
+    assert wireless["radio1"]["channel"] == "6"
+    assert wireless["radio1"]["htmode"] == "HT20"
     assert wireless["radio1"].get("hostapd_options") is None
     firewall = json.loads((transaction_dir / "candidate" / "firewall").read_text())
     assert firewall["defaults"]["flow_offloading"] == "1"
@@ -948,6 +950,8 @@ def test_wireless_assignment_follows_bands_not_radio_numbers(router):
     assert candidate["radio1"]["channel"] == "36"
     assert candidate["radio1"]["htmode"] == "HE80"
     assert candidate["radio1"]["hostapd_options"] == ["he_twt_responder=0"]
+    assert candidate["radio0"]["channel"] == "6"
+    assert candidate["radio0"]["htmode"] == "HT20"
     assert candidate["radio0"].get("hostapd_options") is None
 
 
@@ -966,6 +970,23 @@ def test_prepare_rejects_invalid_channel(router):
     result = run_router(env, "prepare", "--recovery-ready", check=False)
     assert result.returncode != 0
     assert "CHANNEL must be an integer from 36 through 177" in result.stderr
+
+
+def test_prepare_applies_custom_2g_channel_with_ht20(router):
+    _, _, backups, _, env = router
+    env["CHANNEL_2G"] = "11"
+    _, transaction = prepare(env)
+    candidate = json.loads((backups / transaction / "candidate" / "wireless").read_text())
+    assert candidate["radio1"]["channel"] == "11"
+    assert candidate["radio1"]["htmode"] == "HT20"
+
+
+def test_prepare_rejects_invalid_2g_channel(router):
+    _, _, _, _, env = router
+    env["CHANNEL_2G"] = "14"
+    result = run_router(env, "prepare", "--recovery-ready", check=False)
+    assert result.returncode != 0
+    assert "CHANNEL_2G must be an integer from 1 through 13" in result.stderr
 
 
 @pytest.mark.parametrize("vpn_addr", [
@@ -1095,6 +1116,21 @@ def test_setup_rejects_invalid_channel_before_mutation(router):
     )
     assert result.returncode != 0
     assert "CHANNEL must be an integer from 36 through 177" in result.stderr
+    assert not marker.exists()
+
+
+def test_setup_rejects_invalid_2g_channel_before_mutation(router):
+    root, _, _, _, env = router
+    marker = root / "mutation-attempted"
+    write_executable(root / "bin" / "apk", f"#!/bin/sh\ntouch '{marker}'\n")
+    key = "A" * 43 + "="
+    env.update({"VPN_KEY": key, "CHANNEL_2G": "0"})
+    result = subprocess.run(
+        [str(REPO / "setup.sh"), "--recovery-ready"],
+        env=env, text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "CHANNEL_2G must be an integer from 1 through 13" in result.stderr
     assert not marker.exists()
 
 
